@@ -528,3 +528,85 @@ func TestConcurrentAccess(t *testing.T) {
 	// This ensures that the cache handles concurrent access safely without exceeding expected capacity.
 	assert.LessOrEqual(t, cache.Len(), numWorkers*iterations, "Len() after concurrent access should not be excessively large")
 }
+
+func TestMemoryCacheConcurrency(t *testing.T) {
+	// Mark the test to be run in parallel with other tests.
+	t.Parallel()
+
+	// Create a cancellable context to control the cache's lifecycle.
+	ctx, cancel := context.WithCancel(context.Background())
+	// Ensure the context is cancelled at the end of the test.
+	defer cancel()
+
+	// Initialize a new memory cache with the context and a default TTL.
+	cache := NewMemoryCache[string, string](ctx, DefaultTTL, 1*time.Minute, 1000)
+	// Number of concurrent goroutines to spawn.
+	const numGoroutines = 100
+
+	// Create a wait group to synchronize the completion of all goroutines.
+	wg := &sync.WaitGroup{}
+	// Ensure all goroutines have completed before the test ends.
+	defer wg.Wait()
+
+	// Subtest for concurrent set and get operations.
+	// TestConcurrentSetAndGet tests the concurrent setting and getting of cache values.
+	// It ensures that the cache can handle multiple goroutines setting and getting values concurrently.
+	t.Run("TestConcurrentSetAndGet", func(t *testing.T) {
+		// Loop to start multiple goroutines.
+		for i := 0; i < numGoroutines; i++ {
+			// Increment the wait group counter for each goroutine.
+			wg.Add(1)
+
+			// Launch a goroutine to perform set and get operations.
+			go func(i int) {
+				// Decrement the counter when the goroutine completes.
+				defer wg.Done()
+
+				// Set a key-value pair in the cache.
+				cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
+
+				// Retrieve the value from the cache.
+				val, ok := cache.Get(fmt.Sprintf("key%d", i))
+
+				// Verify that the value was retrieved successfully.
+				assert.True(t, ok, fmt.Sprintf("Expected key key %d to exist in cache", i))
+				assert.Equal(t, fmt.Sprintf("value%d", i), val, fmt.Sprintf("Expected value for key key %d to be value %d", i, i))
+			}(i)
+		}
+
+		// Allow time for all goroutines to complete their operations.
+		time.Sleep(2 * time.Second)
+	})
+
+	// Subtest for concurrent remove operations.
+	// TestConcurrentRemove tests the concurrent removal of cache values.
+	// It ensures that the cache can handle multiple goroutines removing values concurrently.
+	t.Run("TestConcurrentRemove", func(t *testing.T) {
+		// Loop to start multiple goroutines.
+		for i := 0; i < numGoroutines; i++ {
+			// Increment the wait group counter for each goroutine.
+			wg.Add(1)
+
+			// Launch a goroutine to perform set and remove operations.
+			go func(i int) {
+				// Decrement the counter when the goroutine completes.
+				defer wg.Done()
+
+				// Set a key-value pair in the cache.
+				cache.Set(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), 0)
+
+				// Remove the key from the cache.
+				cache.Remove(fmt.Sprintf("key%d", i))
+
+				// Attempt to retrieve the value from the cache.
+				_, ok := cache.Get(fmt.Sprintf("key%d", i))
+
+				// Verify that the value was not found in the cache.
+				assert.False(t, ok, fmt.Sprintf("Expected key key%d to be removed from cache", i))
+			}(i)
+		}
+
+		// Allow time for all goroutines to complete their operations.
+		time.Sleep(2 * time.Second)
+	})
+}
