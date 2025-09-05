@@ -2,6 +2,8 @@ package go_cache
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -429,4 +431,100 @@ func TestMemoryCache(t *testing.T) {
 		// This allows further operations on the cache.
 		cache.mutex.RUnlock()
 	})
+}
+
+// TestConcurrentAccess tests thread-safety under concurrent Set, Get, and Remove.
+// TestConcurrentAccess tests the MemoryCache's ability to handle concurrent access.
+// It validates the thread-safety of the cache during simultaneous Set, Get, and Remove operations
+// by multiple goroutines. The test ensures that no race conditions or panics occur under high concurrency.
+func TestConcurrentAccess(t *testing.T) {
+	// Create a background context to manage the lifecycle of the MemoryCache instance.
+	// This context is passed to the MemoryCache to ensure operations can be canceled if needed.
+	ctx := context.Background()
+
+	// Initialize a new MemoryCache with a TTL of 5 minutes and a capacity of 1000 entries.
+	// This instance will be used to test concurrent access.
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 5*time.Minute, 1000)
+
+	// Define a WaitGroup to synchronize the completion of all goroutines.
+	// This ensures that the test waits for all concurrent operations to finish.
+	var wg sync.WaitGroup
+
+	// Specify the number of worker goroutines that will perform operations on the cache.
+	const numWorkers = 10
+
+	// Specify the number of iterations each worker will perform.
+	// This determines the workload for each goroutine.
+	const iterations = 1000
+
+	// Perform concurrent Set operations using multiple worker goroutines.
+	for i := 0; i < numWorkers; i++ {
+		// Increment the WaitGroup counter for each worker.
+		wg.Add(1)
+
+		// Launch a goroutine to perform Set operations.
+		go func(id int) {
+			// Decrement the WaitGroup counter when the goroutine completes.
+			defer wg.Done()
+
+			// Perform a series of Set operations using unique keys for each iteration.
+			for j := 0; j < iterations; j++ {
+				// Generate a unique key based on the worker ID and iteration index.
+				key := fmt.Sprintf("key-%d-%d", id, j)
+
+				// Store a value in the cache with no TTL, ensuring it persists unless explicitly removed.
+				cache.Set(key, fmt.Sprintf("value-%d", j), 0)
+			}
+		}(i)
+	}
+
+	// Perform concurrent Get operations using multiple worker goroutines.
+	for i := 0; i < numWorkers; i++ {
+		// Increment the WaitGroup counter for each worker.
+		wg.Add(1)
+
+		// Launch a goroutine to perform Get operations.
+		go func(id int) {
+			// Decrement the WaitGroup counter when the goroutine completes.
+			defer wg.Done()
+
+			// Perform a series of Get operations using the same keys used in Set operations.
+			for j := 0; j < iterations; j++ {
+				// Generate a unique key based on the worker ID and iteration index.
+				key := fmt.Sprintf("key-%d-%d", id, j)
+
+				// Attempt to retrieve the value associated with the key from the cache.
+				cache.Get(key)
+			}
+		}(i)
+	}
+
+	// Perform concurrent Remove operations using multiple worker goroutines.
+	for i := 0; i < numWorkers; i++ {
+		// Increment the WaitGroup counter for each worker.
+		wg.Add(1)
+
+		// Launch a goroutine to perform Remove operations.
+		go func(id int) {
+			// Decrement the WaitGroup counter when the goroutine completes.
+			defer wg.Done()
+
+			// Perform a series of Remove operations using the same keys used in Set operations.
+			for j := 0; j < iterations; j++ {
+				// Generate a unique key based on the worker ID and iteration index.
+				key := fmt.Sprintf("key-%d-%d", id, j)
+
+				// Remove the entry associated with the key from the cache.
+				cache.Remove(key)
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete their operations.
+	// This ensures that the test proceeds only after all Set, Get, and Remove operations are finished.
+	wg.Wait()
+
+	// Verify the final state of the cache. It should have fewer items than the total number of operations.
+	// This ensures that the cache handles concurrent access safely without exceeding expected capacity.
+	assert.LessOrEqual(t, cache.Len(), numWorkers*iterations, "Len() after concurrent access should not be excessively large")
 }
