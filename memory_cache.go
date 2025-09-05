@@ -169,6 +169,8 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 		// This step casts the element's value to the expected Item[K, V] type.
 		item := element.Value.(*Item[K, V])
 
+		// Check if the item's expiration time is before the current moment.
+		// This determines whether the item should be considered expired and removed.
 		if item.ExpiresAt.Before(time.Now()) {
 			// Acquire a write lock to safely modify the cache state.
 			// This ensures no other operations interfere with the removal process.
@@ -182,7 +184,7 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 			// Release the write lock to allow other operations to proceed.
 			m.mutex.Unlock()
 			// Return nil to indicate the key is no longer available due to expiration.
-			return res, nil
+			return nil, nil
 		}
 
 		// Acquire a write lock to update the recency order of the cache item.
