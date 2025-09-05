@@ -13,6 +13,46 @@ import (
 func TestMemoryCache(t *testing.T) {
 	t.Parallel()
 
+	// SetAndFetchUseDefaultOptions tests the functionality of initializing a memory cache with default options
+	// and verifies that setting and retrieving a key-value pair works as expected. It validates that the cache
+	// correctly applies default TTL and expire check interval values when zero values are provided during
+	// initialization. Additionally, it ensures the cache stores and retrieves the key-value pair before the TTL expires,
+	// maintaining data integrity and accessibility during its validity period.
+	t.Run("SetAndFetchUseDefaultOptions", func(t *testing.T) {
+		// Create a new instance of MemoryCache with a background context, zero TTL, zero expire check interval,
+		// and a maximum capacity of 1000 entries. Zero values for TTL and expire check interval should result
+		// in the cache using default values (DefaultTTL).
+		cache := NewMemoryCache[string, int](context.Background(), 0, 0, 1000)
+
+		// Verify that the cache's TTL is set to the default TTL value, ensuring the cache correctly applies
+		// the default configuration when a zero TTL is provided.
+		assert.Equal(t, cache.ttl, DefaultTTL, "Expected cache TTL to be set to DefaultTTL")
+		// Confirm that the cache's expire check interval is set to the default TTL value, ensuring the cache
+		// uses the default configuration for periodic cleanup when a zero interval is provided.
+		assert.Equal(t, cache.expireCheckInterval, DefaultTTL, "Expected cache expire check interval to be set to DefaultTTL")
+
+		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
+		// and be removed from the cache after 1 second.
+		cache.Set("key1", 42, time.Second)
+
+		// Retrieve the value associated with "key1" from the cache. If the key exists and
+		// has not expired, the method returns the value and a boolean flag indicating success.
+		element, ok := cache.Get("key1")
+
+		// Verify that the retrieved element is not nil. This ensures the cache correctly stored
+		// the key-value pair and returned a non-nil value for the existing key.
+		assert.NotNil(t, element, "Expected element to be non-nil")
+
+		// Confirm that the retrieved value is 42. This ensures the cache correctly preserved
+		// the value associated with "key1" and returned the expected data.
+		assert.Equal(t, 42, element, "Expected element to be 42")
+
+		// Check that the boolean flag `ok` is true. This indicates that the key "key1" exists
+		// in the cache and was successfully retrieved without any errors.
+		assert.Equal(t, true, ok, "Expected key 'key1' to exist in cache")
+	})
+
 	// SetAndFetch tests the functionality of setting a key-value pair in the memory cache
 	// and subsequently retrieving it. It validates that the cache correctly stores the key-value pair
 	// and retrieves it before the time-to-live (TTL) expires. This test ensures that the caching
