@@ -431,6 +431,52 @@ func TestMemoryCache(t *testing.T) {
 		// This allows further operations on the cache.
 		cache.mutex.RUnlock()
 	})
+
+	// GetItemInHeapNotInItems tests the Get method when retrieving an item that exists
+	// in the cache but has expired. It verifies that the expired item is removed from the
+	// items map and LRU list, the size is decremented, and Get returns the zero value with false.
+	t.Run("GetItemInHeapNotInItems", func(t *testing.T) {
+		// Create a new cancellable context to manage the cache lifecycle.
+		// This allows the test to clean up the cache's background goroutine properly.
+		ctx, cancel := context.WithCancel(context.Background())
+		// Ensure the context is canceled after the test to stop the collector goroutine.
+		defer cancel()
+
+		// Initialize the memory cache with a 10ms TTL and 1s cleanup interval.
+		// The short TTL ensures quick expiration, and the long cleanup interval prevents
+		// the collector from removing the item before Get is called. Set maxItems to 10
+		// to avoid LRU eviction interfering with the test.
+		cache := NewMemoryCache[string, string](ctx, time.Millisecond*10, time.Second, 10)
+
+		// Insert a key-value pair with a very short TTL (1ms) so it expires quickly.
+		// This adds "expiredKey" to the items map, LRU list, and expiration heap.
+		cache.Set("expiredKey", "expiredValue", time.Millisecond*1)
+
+		// Sleep for 5ms to guarantee the item has expired.
+		// This ensures item.ExpiresAt is before time.Now() when Get is called.
+		time.Sleep(time.Millisecond * 5)
+
+		// Call Get on the expired item to trigger the expiration branch.
+		// This should remove the item from the items map and LRU list, decrement the size,
+		// and return the zero value with false.
+		value, ok := cache.Get("expiredKey")
+
+		// Assert that Get reports the item as missing (false).
+		// This verifies that the expiration logic correctly identifies the item as expired.
+		assert.False(t, ok, "expected get to return false for expired item")
+
+		// Assert that the returned value is the zero value for string.
+		// This ensures Get returns the correct zero value ("") for the expired item.
+		assert.Equal(t, "", value, "expected value to be zero value after expiration")
+
+		// Assert that the cache size is decremented to 0.
+		// This confirms that the size counter was updated after removing the expired item.
+		assert.Equal(t, 0, cache.Len(), "expected cache length to be zero after removal of expired item")
+
+		// Assert that the item is no longer in the items map (verifies deletion).
+		// This checks that Contains returns false, confirming the item was removed from the map.
+		assert.False(t, cache.Contains("expiredKey"), "expected expired key to be removed from items map")
+	})
 }
 
 // TestConcurrentAccess tests thread-safety under concurrent Set, Get, and Remove.
