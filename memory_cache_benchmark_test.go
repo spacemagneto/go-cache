@@ -47,3 +47,19 @@ func BenchmarkMemoryCacheParallelSet(b *testing.B) {
 	// Forcing the garbage collector (GC) to run to clear memory after benchmarking.
 	runtime.GC()
 }
+
+func BenchmarkGetHit(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 1*time.Minute, 1000)
+	// Pre-populate cache with some items
+	for i := 0; i < 500; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		cache.Set(key, "value", 0)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key-%d", i%500)
+		cache.Get(key)
+	}
+}
