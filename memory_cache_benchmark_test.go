@@ -114,3 +114,20 @@ func BenchmarkContainsExists(b *testing.B) {
 		cache.Contains(key)
 	}
 }
+
+// BenchmarkContainsNotExists tests the performance of the Contains operation for non-existent keys.
+func BenchmarkContainsNotExists(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 1*time.Minute, 1000)
+	// Pre-populate cache
+	for i := 0; i < 500; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		cache.Set(key, "value", 0)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key-%d", i+1000)
+		cache.Contains(key)
+	}
+}
