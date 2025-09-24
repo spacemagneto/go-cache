@@ -179,3 +179,19 @@ func BenchmarkMemoryCacheFetch(b *testing.B) {
 	// Forcing the garbage collector (GC) to run to clear memory after benchmarking.
 	runtime.GC()
 }
+
+// BenchmarkExpiration tests the performance of the expiration cleanup with a small dataset.
+func BenchmarkExpiration(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Millisecond, 1000)
+	// Pre-populate cache with expired items
+	for i := 0; i < 1000; i++ {
+		cache.Set(fmt.Sprintf("key-%d", i), "value", 1*time.Millisecond)
+	}
+	time.Sleep(2 * time.Millisecond) // Ensure items are expired
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.deleteExpiredData()
+	}
+}
