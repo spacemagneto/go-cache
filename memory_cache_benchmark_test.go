@@ -80,3 +80,20 @@ func BenchmarkGetMiss(b *testing.B) {
 		cache.Get(key)
 	}
 }
+
+// BenchmarkRemove tests the performance of the Remove operation.
+func BenchmarkRemove(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 1*time.Minute, 1000)
+	// Pre-populate cache
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		cache.Set(key, "value", 0)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key-%d", i%1000)
+		cache.Remove(key)
+	}
+}
