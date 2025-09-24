@@ -131,3 +131,18 @@ func BenchmarkContainsNotExists(b *testing.B) {
 		cache.Contains(key)
 	}
 }
+
+// BenchmarkLen tests the performance of the Len operation.
+func BenchmarkLen(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 1*time.Minute, 1000)
+	// Pre-populate cache
+	for i := 0; i < 1000; i++ {
+		cache.Set(fmt.Sprintf("key-%d", i), "value", 0)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Len()
+	}
+}
