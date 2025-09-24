@@ -97,3 +97,20 @@ func BenchmarkRemove(b *testing.B) {
 		cache.Remove(key)
 	}
 }
+
+// BenchmarkContainsExists tests the performance of the Contains operation for existing keys.
+func BenchmarkContainsExists(b *testing.B) {
+	ctx := context.Background()
+	cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 1*time.Minute, 1000)
+	// Pre-populate cache
+	for i := 0; i < 500; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		cache.Set(key, "value", 0)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key-%d", i%500)
+		cache.Contains(key)
+	}
+}
