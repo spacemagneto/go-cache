@@ -451,7 +451,7 @@ func TestMemoryCache(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		// Acquire a read lock to safely check the cache state.
 		// This ensures thread-safe access to the cache’s data structures.
-		cache.mutex.RLock()
+		lockTocken := cache.mutex.RLock()
 		// Verify that key1 is still present in the cache.
 		// This tests if the item persists after collector shutdown.
 		_, ok := cache.items["key1"]
@@ -469,7 +469,7 @@ func TestMemoryCache(t *testing.T) {
 		assert.Equal(t, 1, cache.expirationHeap.Len(), "Expected expirationHeap length to be 1 after context cancellation")
 		// Release the read lock after checking the cache state.
 		// This allows further operations on the cache.
-		cache.mutex.RUnlock()
+		cache.mutex.RUnlock(lockTocken)
 	})
 
 	// GetItemInHeapNotInItems tests the Get method when retrieving an item that exists
