@@ -4,12 +4,11 @@ import (
 	"container/heap"
 	"container/list"
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/singleflight"
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 // DefaultTTL is the default time-to-live duration for cache items.
@@ -25,9 +24,9 @@ type MemoryCache[K comparable, V any] struct {
 	ttl                 time.Duration        // Default time-to-live duration
 	maxItems            int                  // Maximum number of items in the cache (0 = unlimited)
 	size                atomic.Int32         // Atomic counter for cache size
-	mutex               sync.RWMutex         // Mutex for thread safety
-	group               singleflight.Group   // Singleflight for cache stampede prevention
-	expireCheckInterval time.Duration        // Interval for cleaning up expired items
+	mutex               *xsync.RBMutex
+	setChan             chan *Item[K, V]
+	expireCheckInterval time.Duration // Interval for cleaning up expired items
 }
 
 // NewMemoryCache creates a new MemoryCache instance with the specified TTL and max items.
@@ -41,7 +40,7 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 		expireCheckInterval = DefaultTTL
 	}
 
-	cache := &MemoryCache[K, V]{parentCtx: ctx, list: list.New(), items: make(map[K]*list.Element), expirationHeap: make(ExpirationHeap[K, V], 0), ttl: ttl, maxItems: maxItems, expireCheckInterval: expireCheckInterval}
+	cache := &MemoryCache[K, V]{mutex: xsync.NewRBMutex(), parentCtx: ctx, list: list.New(), items: make(map[K]*list.Element), expirationHeap: make(ExpirationHeap[K, V], 0), ttl: ttl, maxItems: maxItems, expireCheckInterval: expireCheckInterval}
 
 	// Initialize the expiration heap for the cache.
 	// This ensures that the heap is properly set up for managing expiration times.
@@ -75,10 +74,6 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	if ttl == 0 {
 		ttl = m.ttl
 	}
-
-	// Create a new cache item with the specified key, value, and expiration time.
-	// The expiration time is calculated based on the current time plus the TTL.
-	item := &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl)}
 
 	// Acquire a write lock to ensure thread safety while updating the cache.
 	// This prevents other goroutines from modifying the cache while this operation is in progress.
@@ -121,6 +116,12 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 		}
 	}
 
+	var item *Item[K, V]
+
+	// Create a new cache item with the specified key, value, and expiration time.
+	// The expiration time is calculated based on the current time plus the TTL.
+	item = &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl)}
+
 	// Insert the new item at the front of the doubly linked list.
 	// Placing it at the front marks it as the most recently used item.
 	element := m.list.PushFront(item)
@@ -144,71 +145,55 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 	// This will be returned if the key is not found or an error occurs.
 	var res V
 
-	// Convert the key to a string using fmt.Sprintf for use as a unique identifier.
-	// This string is used as the deduplication key in the singleflight group.
-	keyStr := fmt.Sprintf("%v", key)
+	// Acquire a read lock to safely access the items map without blocking readers.
+	// This ensures thread safety while allowing concurrent reads.
+	lockTocken := m.mutex.RLock()
+	// Retrieve the linked list element associated with the key from the items map.
+	element := m.items[key]
+	// Release the read lock to allow other read operations to proceed.
+	m.mutex.RUnlock(lockTocken)
 
-	// Use the singleflight group to deduplicate requests for the same key.
-	// If multiple goroutines request the same key simultaneously, only one computation is performed.
-	value, err, _ := m.group.Do(keyStr, func() (interface{}, error) {
-		// Acquire a read lock to safely access the items map without blocking readers.
-		// This ensures thread safety while allowing concurrent reads.
-		m.mutex.RLock()
-		// Retrieve the linked list element associated with the key from the items map.
-		element := m.items[key]
-		// Release the read lock to allow other read operations to proceed.
-		m.mutex.RUnlock()
-
-		// Check if the element is nil, which means the key does not exist in the cache.
-		// If so, return nil, and error to indicate the element is not found.
-		if element == nil {
-			return res, fmt.Errorf("element is not found")
-		}
-
-		// Retrieve the cache item from the linked list element.
-		// This step casts the element's value to the expected Item[K, V] type.
-		item := element.Value.(*Item[K, V])
-
-		// Check if the item's expiration time is before the current moment.
-		// This determines whether the item should be considered expired and removed.
-		if item.ExpiresAt.Before(time.Now()) {
-			// Acquire a write lock to safely modify the cache state.
-			// This ensures no other operations interfere with the removal process.
-			m.mutex.Lock()
-			// Remove the expired item from the linked list to maintain the LRU order.
-			m.list.Remove(element)
-			// Delete the expired item's key from the `items` map to release the memory.
-			delete(m.items, item.Key)
-			// Decrement the size counter to reflect the removal of this item.
-			m.size.Add(-1)
-			// Release the write lock to allow other operations to proceed.
-			m.mutex.Unlock()
-			// Return nil to indicate the key is no longer available due to expiration.
-			return nil, fmt.Errorf("the expiration time has passed")
-		}
-
-		// Acquire a write lock to update the recency order of the cache item.
-		// Moving the item to the front ensures it is marked as the most recently used.
-		m.mutex.Lock()
-		// Move the item to the front of the linked list to update its usage.
-		m.list.MoveToFront(element)
-		// Assign the value of the cache item to res for returning later.
-		res = item.Value
-		// Release the write lock after updating the recency order.
-		m.mutex.Unlock()
-		// Return the value of the cache item for use in the singleflight response.
-		return res, nil
-	})
-
-	// Check if an error occurred during the singleflight execution or if the value is nil.
-	// If either condition is true, return the zero value and `false` to indicate failure.
-	if err != nil || value == nil {
+	// Check if the element is nil, which means the key does not exist in the cache.
+	// If so, return nil, and error to indicate the element is not found.
+	if element == nil {
 		return res, false
 	}
 
+	// Retrieve the cache item from the linked list element.
+	// This step casts the element's value to the expected Item[K, V] type.
+	item := element.Value.(*Item[K, V])
+
+	// Check if the item's expiration time is before the current moment.
+	// This determines whether the item should be considered expired and removed.
+	if item.ExpiresAt.Before(time.Now()) {
+		// Acquire a write lock to safely modify the cache state.
+		// This ensures no other operations interfere with the removal process.
+		m.mutex.Lock()
+		// Remove the expired item from the linked list to maintain the LRU order.
+		m.list.Remove(element)
+		// Delete the expired item's key from the `items` map to release the memory.
+		delete(m.items, item.Key)
+		// Decrement the size counter to reflect the removal of this item.
+		m.size.Add(-1)
+		// Release the write lock to allow other operations to proceed.
+		m.mutex.Unlock()
+		// Return nil to indicate the key is no longer available due to expiration.
+		return res, false
+	}
+
+	// Acquire a write lock to update the recency order of the cache item.
+	// Moving the item to the front ensures it is marked as the most recently used.
+	m.mutex.Lock()
+	// Move the item to the front of the linked list to update its usage.
+	m.list.MoveToFront(element)
+	// Release the write lock after updating the recency order.
+	m.mutex.Unlock()
+	// Assign the value of the cache item to res for returning later.
+	res = item.Value
+
 	// Return the retrieved value cast to type V and true to indicate success.
 	// The cast ensures the value conforms to the expected type of the caller.
-	return value.(V), true
+	return res, true
 }
 
 // Contains checks if a given key exists in the cache.
@@ -217,10 +202,10 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 func (m *MemoryCache[K, V]) Contains(key K) bool {
 	// Acquire a read lock to ensure thread-safe access to the items map.
 	// This allows multiple readers to access the cache simultaneously without conflicts.
-	m.mutex.RLock()
+	lockTocken := m.mutex.RLock()
 	// Ensure the read lock is released after the function executes, even in case of errors.
 	// Using defer guarantees proper cleanup and prevents potential deadlocks.
-	defer m.mutex.RUnlock()
+	defer m.mutex.RUnlock(lockTocken)
 
 	// Check if the key exists in the items map and store the result in ok.
 	// This operation does not modify the cache and is efficient with the read lock held.
