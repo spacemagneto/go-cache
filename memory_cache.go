@@ -25,7 +25,6 @@ type MemoryCache[K comparable, V any] struct {
 	maxItems            int                  // Maximum number of items in the cache (0 = unlimited)
 	size                atomic.Int32         // Atomic counter for cache size
 	mutex               *xsync.RBMutex
-	setChan             chan *Item[K, V]
 	expireCheckInterval time.Duration // Interval for cleaning up expired items
 }
 
