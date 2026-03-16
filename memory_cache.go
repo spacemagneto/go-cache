@@ -236,6 +236,8 @@ func (m *MemoryCache[K, V]) Remove(key K) bool {
 		// Remove the key from the items map to eliminate it from the cache.
 		// This ensures that the key is no longer accessible in the cache.
 		delete(m.items, key)
+
+		heap.Remove(&m.expirationHeap, element.Value.(*Item[K, V]).index)
 		// Decrement the size of the cache to reflect the removal of an item.
 		// The cache size is updated atomically for thread-safe size tracking.
 		m.size.Add(-1)

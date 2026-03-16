@@ -9,4 +9,5 @@ type Item[Key comparable, Value any] struct {
 	Key       Key       // Key is a unique identifier for the item.
 	Value     Value     // Value is the data associated with the item.
 	ExpiresAt time.Time // ExpiresAt is the time at which the item is considered expired.
+	index     int
 }
