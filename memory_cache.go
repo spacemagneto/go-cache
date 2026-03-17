@@ -90,68 +90,31 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 // This method ensures that items are stored with proper expiration times and maintains
 // the order of usage to support LRU eviction.
 func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
-	// If TTL is zero, set it to the default TTL value.
-	if ttl == 0 {
+	if m.closed.Load() {
+		return
+	}
+
+	if ttl <= 0 {
 		ttl = m.ttl
 	}
 
-	// Create a new cache item with the specified key, value, and expiration time.
-	// The expiration time is calculated based on the current time plus the TTL.
-	item := &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl)}
-
-	// Acquire a write lock to ensure thread safety while updating the cache.
-	// This prevents other goroutines from modifying the cache while this operation is in progress.
 	m.mutex.Lock()
-	// Ensure that the lock is released when the function completes, even if an error occurs or an early return happens.
 	defer m.mutex.Unlock()
 
-	// Check if the key already exists in the cache by looking it up in the items map.
-	// If it exists, remove the corresponding element from the linked list.
-	if element, ok := m.items[key]; ok {
-		// Remove the existing element from the doubly linked list (m.list).
-		m.list.Remove(element)
-		// Decrement the size counter of the cache, as the old item is removed.
-		m.size.Add(-1)
-
-		// Note: The existing item is not removed from the expiration heap at this point.
-		// It will eventually be replaced during heap operations.
-	}
-
-	// Check if the cache has reached its maximum capacity based on the maxItems setting.
-	// If the cache is full, evict the least recently used (LRU) item to make space.
 	if m.maxItems > 0 && int(m.size.Load()) >= m.maxItems {
-		// Retrieve the least recently used item from the back of the doubly linked list.
-		// This item has the lowest priority for retention in the cache.
-		if element := m.list.Back(); element != nil {
-			// Cast the retrieved element's value to the cache item type.
-			// This step ensures the value can be manipulated correctly.
-			oldItem := element.Value.(*Item[K, V])
-			// Remove the least recently used item from the doubly linked list.
-			// This operation updates the order of items in the cache.
-			m.list.Remove(element)
-			// Delete the removed item's entry from the items map using its key.
-			// This ensures that the cache remains consistent with its internal structures.
-			delete(m.items, oldItem.Key)
-			// Decrement the size counter of the cache after removing the item.
-			// The size counter must remain accurate to reflect the current state of the cache.
-			m.size.Add(-1)
-
-			// Note: The old item remains in the expiration heap and will be cleaned up later by a collector.
-		}
+		m.evictLRULocked()
 	}
 
-	// Insert the new item at the front of the doubly linked list.
-	// Placing it at the front marks it as the most recently used item.
-	element := m.list.PushFront(item)
-	// Map the key to the newly added element in the items map.
-	// This allows for quick lookup of the item based on its key.
-	m.items[key] = element
-	// Push the new cache item onto the expiration heap for expiration management.
-	// The expiration heap ensures items expire in the correct order as their TTL elapses.
-	heap.Push(&m.expirationHeap, item)
+	if element, ok := m.items[key]; ok {
+		m.list.Remove(element)
+		m.size.Add(-1)
+	}
 
-	// Increment the size counter to reflect the addition of the new cache item.
-	// This maintains an accurate count of the items currently stored in the cache.
+	item := &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl)}
+
+	element := m.list.PushFront(&entry[K, V]{item: item})
+	m.items[key] = element
+	heap.Push(&m.expirationHeap, item)
 	m.size.Add(1)
 }
 
