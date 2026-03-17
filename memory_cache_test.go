@@ -537,6 +537,62 @@ func TestMemoryCache(t *testing.T) {
 		// The length must be 0, confirming that "key1" was never added to the map or LRU list.
 		assert.Equal(t, 0, cache.Len(), "Expected Len to be 0 after Set on a closed cache")
 	})
+
+	// ContainsTriggersDefaultCase verifies that when an expired key is discovered,
+	// if the pendingDeleteCh is full, the method does not block and correctly
+	// executes the default branch.
+	// This test is critical for high-throughput environments (like 100k RPS) to ensure
+	// that a backlog in the background collector doesn't stall the main request
+	// processing threads due to a blocked channel send.
+	t.Run("ContainsTriggersDefaultCase", func(t *testing.T) {
+		// Initialize a MemoryCache with a standard configuration.
+		// The internal channel buffer is set to 512 by default in the constructor.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+
+		// Manually cancel the context and wait for the collector's WaitGroup to finish.
+		// This stops the background consumer, ensuring the pendingDeleteCh stays
+		// full once we populate it, preventing any race conditions during the test.
+		cache.contextCancelFunc()
+		cache.wg.Wait()
+
+		expiredKey := "expired-key"
+
+		// Manually inject an expired item into the map and LRU list.
+		// By setting ExpiresAt to one hour in the past, we force the Contains
+		// logic to identify the item as expired and attempt a background deletion.
+		cache.mutex.Lock()
+		val := &entry[string, int]{
+			item: &Item[string, int]{
+				ExpiresAt: time.Now().Add(-time.Hour),
+			},
+		}
+
+		cache.items[expiredKey] = cache.list.PushFront(val)
+		cache.mutex.Unlock()
+
+		// Fill the channel buffer completely to its capacity (512).
+		// Once full, any further attempts to send to this channel will block
+		// unless a select statement with a default branch is used.
+		for i := 0; i < cap(cache.pendingDeleteCh); i++ {
+			cache.pendingDeleteCh <- "filler"
+		}
+
+		// Call Contains on the expired key. This should trigger the internal
+		// 'select { case c.pendingDeleteCh <- key: default: }' logic.
+		// Since the channel is full, it must hit the default branch and return
+		// false immediately without blocking the execution.
+		assert.False(t, cache.Contains(expiredKey), "Expected false for expired key")
+
+		// Verify that the channel remains at full capacity.
+		// This confirms that the 'expired-key' was not able to squeeze into the buffer.
+		assert.Equal(t, cap(cache.pendingDeleteCh), len(cache.pendingDeleteCh), "Channel should remain at full capacity")
+
+		// Retrieve the first message from the channel to verify its content.
+		// We expect the original "filler" string, proving that the later
+		// "expired-key" signal was indeed dropped by the default branch.
+		msg := <-cache.pendingDeleteCh
+		assert.Equal(t, "filler", msg, "The first item should be the filler, proving the expired key was dropped by default branch")
+	})
 }
 
 // TestCollector groups tests that verify the background goroutine correctly
