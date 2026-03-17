@@ -269,6 +269,29 @@ func (m *MemoryCache[K, V]) collector(ctx context.Context) {
 	}
 }
 
+// drainPending removes all keys currently queued in pendingDelete.
+// It is called at the start of every tick so the subsequent heap scan operates
+// on a map that already reflects the expirations signaled by Get and Contains.
+// The non-blocking default branch guarantees drainPending never blocks the
+// collector even when the channel is empty.
+func (m *MemoryCache[K, V]) drainPending() {
+	for {
+		select {
+		case key, ok := <-m.pendingDeleteCh:
+			if !ok {
+				return
+			}
+
+			m.mutex.Lock()
+			m.remove(key)
+			m.mutex.Unlock()
+
+		default:
+			return
+		}
+	}
+}
+
 // deleteExpiredData purges all items from the cache whose TTL has elapsed.
 // It uses the expiration heap to find candidates and resolves tombstones
 // (stale entries) by comparing item versions in O(1) before removal.
