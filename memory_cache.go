@@ -97,10 +97,10 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 	return cache
 }
 
-// Set adds or updates an item in the cache with the specified key, value, and TTL.
-// If the cache exceeds its maximum allowed items, the least recently used item is evicted.
-// This method ensures that items are stored with proper expiration times and maintains
-// the order of usage to support LRU eviction.
+// Set stores key/value with the given TTL. Pass 0 to use the cache default.
+// If the cache has reached maxItems the least-recently-used entry is evicted first.
+// Re-setting an existing key replaces the value and resets the TTL; the old heap
+// entry becomes a tombstone that the collector discards by version comparison.
 func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	if m.closed.Load() {
 		return
@@ -130,9 +130,10 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	m.size.Add(1)
 }
 
-// Get retrieves an item from the cache by its key.
-// If the item is found and has not expired, it is returned along with a boolean true.
-// If the item is not found or has expired, the zero value and boolean false are returned.
+// Get returns the cached value for key. The second return value is false when
+// the key is absent, the item has expired, or the cache is closed.
+// Expired items are removed asynchronously; Get never takes a write lock on
+// the hot path. LRU order is updated only for live, non-expired items.
 func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 	var zero V
 
@@ -169,9 +170,8 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 	return item.Value, true
 }
 
-// Contains checks if a given key exists in the cache.
-// This method acquires a lock to ensure thread safety while accessing the cache
-// and then checks if the key is present in the map of cached items.
+// Contains reports whether key is present and not expired without updating LRU
+// order. Expired items are forwarded to the collector the same way as in Get.
 func (m *MemoryCache[K, V]) Contains(key K) bool {
 	if m.closed.Load() {
 		return false
@@ -198,10 +198,8 @@ func (m *MemoryCache[K, V]) Contains(key K) bool {
 	return true
 }
 
-// Remove removes an item from the cache by its key.
-// This method is thread-safe and ensures that the item is properly removed from both
-// the list and the map, as well as from the expiration buckets map.
-// It returns true if the item was found and removed, and false if the key does not exist in the cache.
+// Remove deletes key from the cache and returns true if the key existed.
+// The associated heap entry becomes a tombstone cleaned up by the collector.
 func (m *MemoryCache[K, V]) Remove(key K) bool {
 	if m.closed.Load() {
 		return false
@@ -351,4 +349,25 @@ func (m *MemoryCache[K, V]) deleteExpiredData() {
 			m.size.Add(-1)
 		}
 	}
+}
+
+// Close stops the background collector and releases all resources held by the
+// cache. It blocks until the collector goroutine has exited. Any call to Set,
+// Get, Contains, or Remove after Close returns ErrClosed / false immediately.
+// Close is idempotent; calling it more than once is safe.
+func (m *MemoryCache[K, V]) Close() {
+	if m.closed.Swap(true) {
+		return
+	}
+
+	m.contextCancelFunc()
+	close(m.pendingDeleteCh)
+
+	m.wg.Wait()
+
+	m.list.Init()
+
+	m.expirationHeap = nil
+
+	m.size.Store(0)
 }
