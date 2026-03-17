@@ -971,6 +971,131 @@ func TestClose(t *testing.T) {
 	})
 }
 
+// TestLRUEviction groups scenarios that verify the LRU eviction policy: which
+// item is evicted, that Get promotes an item, and that capacity is always respected.
+func TestLRUEviction(t *testing.T) {
+	t.Parallel()
+
+	// EvictsLeastRecentlyUsed confirms that when capacity is exceeded the item
+	// that has gone the longest without being accessed is removed first.
+	t.Run("EvictsLeastRecentlyUsed", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 3)
+		defer cache.Close()
+
+		cache.Set("key1", 1, 0)
+		cache.Set("key2", 2, 0)
+		cache.Set("key3", 3, 0)
+
+		// Access key1 and key3 so key2 becomes the least-recently-used item.
+		cache.Get("key1")
+		cache.Get("key3")
+
+		// Inserting key4 must evict key2.
+		cache.Set("key4", 4, 0)
+
+		_, key2Alive := cache.Get("key2")
+		assert.False(t, key2Alive, "Expected key2 to be evicted as the least-recently-used item")
+		assert.Equal(t, 3, cache.Len(), "Expected cache length to remain at maxItems after eviction")
+	})
+
+	// ResetUpdatesRecency confirms that re-setting an existing key moves it to
+	// the most-recently-used position, protecting it from the next eviction.
+	t.Run("ResetUpdatesRecency", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 2)
+		defer cache.Close()
+
+		cache.Set("key1", 1, 0)
+		cache.Set("key2", 2, 0)
+
+		// Re-set key1: it becomes MRU so key2 is now the LRU candidate.
+		cache.Set("key1", 100, 0)
+
+		// Adding key3 must evict key2, not key1.
+		cache.Set("key3", 3, 0)
+
+		value, ok := cache.Get("key1")
+		assert.True(t, ok, "Expected key1 to survive because re-Set moved it to MRU position")
+		assert.Equal(t, 100, value, "Expected key1 to hold the updated value after re-Set")
+
+		_, key2Alive := cache.Get("key2")
+		assert.False(t, key2Alive, "Expected key2 to be evicted because re-Set of key1 made key2 the LRU")
+	})
+
+	// EvictOnEmptyPool verifies that evictLRULocked handles empty caches gracefully
+	// without triggering a panic. This covers the 'element == nil' check which
+	// occurs when lruList.Back() is called on an empty list.
+	t.Run("EvictOnEmptyPool", func(t *testing.T) {
+		// Initialize a new cache with capacity, but don't add any items.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+		defer cache.Close()
+
+		// Ensure the internal state is truly empty.
+		assert.Equal(t, 0, cache.list.Len(), "LRU list should be empty initially")
+
+		// We call evictLRU manually. Since it's an unexported method,
+		// it's usually called inside Set when capacity is reached, but testing
+		// it directly (if in the same package) or via Set confirms the nil check.
+		assert.NotPanics(t, func() {
+			cache.mutex.Lock()
+			cache.evictLRU()
+			cache.mutex.Unlock()
+		}, "evictLRU must not panic when the LRU list is empty")
+
+		assert.Equal(t, int32(0), cache.size.Load(), "Cache size should remain 0")
+	})
+
+	// DrainPendingRespectsConcurrency verifies that drainPending handles keys
+	// that might not exist in the map (e.g., already removed or double-queued).
+	t.Run("DrainPendingHandlesMissingKeys", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+		defer cache.Close()
+
+		// Put a key in the channel that was never Set in the map
+		cache.pendingDeleteCh <- "ghost-key"
+
+		// Execution: removeLocked (called inside drainPending) should handle this gracefully
+		assert.NotPanics(t, func() { cache.drainPending() }, "drainPending should handle keys not present in the items map")
+
+		assert.Equal(t, 0, len(cache.pendingDeleteCh), "Channel should be cleared regardless")
+	})
+
+	// ClosePendingDeleteChannel verifies that the drainPending method correctly
+	// handles the closure of the pendingDeleteCh channel. It ensures that
+	// if the channel is closed, the drain loop exits gracefully via the
+	// 'if !ok' check instead of panicking or entering an infinite loop.
+	t.Run("ClosePendingDeleteChannel", func(t *testing.T) {
+		// Initialize a new MemoryCache with a capacity of 10 items.
+		// The constructor creates the pendingDeleteCh buffer used for lazy deletions.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+
+		// Inject a "ghost-key" into the channel. This represents a key that was
+		// flagged for deletion by Get/Contains but might have already been
+		// removed or is simply waiting in the buffer.
+		cache.pendingDeleteCh <- "ghost-key"
+
+		// Close the cache, which triggers the internal close(m.pendingDeleteCh) logic.
+		// This transition is monitored by the 'ok' boolean in the receive operation.
+		cache.Close()
+
+		// Verify the atomic 'closed' flag is set to true.
+		// This confirms the cache is in its terminal state.
+		assert.True(t, cache.closed.Load())
+
+		// Execute drainPending and assert that it does not panic.
+		// The method must process the "ghost-key", reach the end of the channel,
+		// detect that the channel is closed ('ok == false'), and return cleanly.
+		assert.NotPanics(t, func() { cache.drainPending() }, "drainPending should handle keys and channel closure gracefully")
+
+		// Verify that the channel buffer is now empty.
+		// This confirms that the loop successfully processed existing items before exiting.
+		assert.Equal(t, 0, len(cache.pendingDeleteCh), "Channel should be cleared after drainPending")
+
+		// Assert that subsequent calls to drainPending on a closed channel
+		// also do not panic and return immediately.
+		assert.NotPanics(t, func() { cache.drainPending() }, "Subsequent calls on a closed channel should be no-ops")
+	})
+}
+
 // TestConcurrentAccess tests thread-safety under concurrent Set, Get, and Remove.
 // TestConcurrentAccess tests the MemoryCache's ability to handle concurrent access.
 // It validates the thread-safety of the cache during simultaneous Set, Get, and Remove operations
