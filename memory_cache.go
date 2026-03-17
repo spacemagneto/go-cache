@@ -269,8 +269,9 @@ func (m *MemoryCache[K, V]) collector(ctx context.Context) {
 	}
 }
 
-// deleteExpiredData removes all expired items from the cache by checking the expiration heap.
-// It ensures that the cache does not hold outdated entries, maintaining freshness and freeing memory.
+// deleteExpiredData purges all items from the cache whose TTL has elapsed.
+// It uses the expiration heap to find candidates and resolves tombstones
+// (stale entries) by comparing item versions in O(1) before removal.
 func (m *MemoryCache[K, V]) deleteExpiredData() {
 	// Acquire a write lock to prevent concurrent modifications during expiration cleanup.
 	// This guarantees thread safety while removing expired items from multiple data structures.
@@ -297,6 +298,18 @@ func (m *MemoryCache[K, V]) deleteExpiredData() {
 		heap.Pop(&m.expirationHeap)
 		// Check if the expired item is still present in the cache's items map.
 		if element, ok := m.items[item.Key]; ok {
+			// Version Check (Tombstone Resolution):
+			// Compare the version of the item stored in the heap against the version
+			// of the live item currently held in the map.
+			//
+			// If the versions do not match, it means the original item was either
+			// overwritten by a newer Set() call or removed/evicted previously.
+			// In this case, the current heap entry is a "stale" version (tombstone)
+			// and should be discarded without affecting the live map entry.
+			if element.Value.(*entry[K, V]).item.version != item.version {
+				continue
+			}
+
 			// Remove the expired item from the linked list used for LRU tracking.
 			m.list.Remove(element)
 			// Delete the expired item's entry from the items map.
