@@ -38,7 +38,7 @@ func TestMemoryCache(t *testing.T) {
 		// This assertion ensures the cache has a sane upper bound to prevent OOM (Out of Memory) errors
 		assert.Equal(t, cache.maxItems, DefaultMaxItems, "Expected cache expire check max cache items to be set to DefaultMaxItems")
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
 		// and be removed from the cache after 1 second.
 		cache.Set("key1", 42, time.Second)
@@ -72,7 +72,7 @@ func TestMemoryCache(t *testing.T) {
 		// This transition is irreversible and should block all subsequent write operations.
 		defer cache.Close()
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
 		// and be removed from the cache after 1 second.
 		cache.Set("key1", 42, time.Second)
@@ -114,7 +114,7 @@ func TestMemoryCache(t *testing.T) {
 		// This transition is irreversible and should block all subsequent write operations.
 		defer cache.Close()
 
-		// Insert a key-value pair ("key1", "value1") into the cache without specifying a TTL.
+		// Set a key-value pair ("key1", "value1") into the cache without specifying a TTL.
 		// This operation tests the cache's ability to store values without expiration.
 		cache.Set("key1", "value1", 0)
 		// Verify that the key "key1" exists in the cache using the Contains method.
@@ -131,7 +131,7 @@ func TestMemoryCache(t *testing.T) {
 		// This ensures the cache stored the correct value.
 		assert.Equal(t, "value1", val, "Expected value for 'key1' to be 'value1'")
 
-		// Insert another key-value pair ("key2", "value2") into the cache with a TTL of 1 second.
+		// Set another key-value pair ("key2", "value2") into the cache with a TTL of 1 second.
 		// This tests the cache's ability to handle values with expiration times.
 		cache.Set("key2", "value2", time.Second)
 		// Verify that the key "key2" exists in the cache immediately after insertion.
@@ -210,7 +210,7 @@ func TestMemoryCache(t *testing.T) {
 		// This transition is irreversible and should block all subsequent write operations.
 		defer cache.Close()
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire quickly.
 		cache.Set("key1", 42, time.Second)
 
@@ -609,7 +609,7 @@ func TestMemoryCache(t *testing.T) {
 		// This is a best practice to avoid side effects in a large test suite.
 		defer cache.Close()
 
-		// Insert "key1" with a very short 50ms TTL.
+		// Set "key1" with a very short 50ms TTL.
 		// This sets the expiration timestamp (ExpiresAt) in the internal item struct.
 		cache.Set("key1", 1, 50*time.Millisecond)
 
@@ -684,6 +684,41 @@ func TestMemoryCache(t *testing.T) {
 		// This confirms the FIFO order remains intact and our filler was not replaced.
 		head := <-cache.pendingDeleteCh
 		assert.Equal(t, "blocker", head, "The head of the channel should be the initial filler")
+	})
+
+	// ExpiredKeyReturnsFalse verifies that an item whose TTL has elapsed is
+	// treated as absent: Get returns false and the zero value even though the
+	// internal map may not yet have been cleaned up by the background collector.
+	t.Run("ExpiredKeyReturnsFalse", func(t *testing.T) {
+		// Initialize a new MemoryCache with a background context and standard intervals.
+		// We use a high capacity (0 for DefaultMaxItems) to ensure eviction doesn't
+		// interfere with the TTL-based expiration test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+
+		// Ensure the collector and internal resources are released upon test completion.
+		// This is a best practice to avoid goroutine leaks in the test suite.
+		defer cache.Close()
+
+		// Set "key1" with a very short 50ms TTL.
+		// This sets the expiration timestamp (ExpiresAt) in the internal item struct.
+		cache.Set("key1", 1, 50*time.Millisecond)
+
+		// Sleep for 100ms to guarantee that the system clock has moved past
+		// the item's expiration deadline.
+		time.Sleep(100 * time.Millisecond)
+
+		// Execute Get for the expired key.
+		// The internal logic should compare 'time.Now()' against 'item.ExpiresAt',
+		// identify it as expired, and return the zero value + false.
+		value, ok := cache.Get("key1")
+
+		// Assert that the success flag is false.
+		// This confirms the cache correctly hides expired data even before physical deletion.
+		assert.False(t, ok, "Expected Get to return false for a key whose TTL has elapsed")
+
+		// Confirm that the returned value is the zero value for the type (0 for int).
+		// This validates that no stale data is leaked to the caller.
+		assert.Equal(t, 0, value, "Expected Get to return the zero value for an expired key")
 	})
 }
 
