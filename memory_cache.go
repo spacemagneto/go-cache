@@ -117,7 +117,7 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 		m.size.Add(-1)
 	}
 
-	item := &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl)}
+	item := &Item[K, V]{Key: key, Value: value, ExpiresAt: time.Now().Add(ttl), version: m.nextVersion.Add(1)}
 
 	element := m.list.PushFront(&entry[K, V]{item: item})
 	m.items[key] = element
