@@ -21,7 +21,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.6 # Latest stable v2 release as of May 2025
+          version: v2.11.3 # Latest stable v2 release as of May 2025
           only-new-issues: true # Show only new issues on PRs
 
   test-nocache:
