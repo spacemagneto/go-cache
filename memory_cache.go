@@ -11,8 +11,13 @@ import (
 
 const (
 	// DefaultTTL is the default time-to-live duration for cache items.
-	DefaultTTL      = time.Hour
-	DefaultMaxItems = 10000
+	DefaultTTL = time.Hour
+	// DefaultExpireCheckInterval defines how often the background collector
+	// sweeps the cache for expired items.
+	DefaultExpireCheckInterval = 10 * time.Minute
+	// DefaultMaxItems is the default capacity limit. When reached,
+	// the least recently used (LRU) items are evicted.
+	DefaultMaxItems = 10_000
 )
 
 // MemoryCache represents an in-memory cache with TTL support and LRU eviction.
@@ -23,7 +28,6 @@ type MemoryCache[K comparable, V any] struct {
 	ttl                 time.Duration        // Default time-to-live duration
 	maxItems            int                  // Maximum number of items in the cache (0 = unlimited)
 	size                atomic.Int32         // Atomic counter for cache size
-	mutex               sync.RWMutex         // Mutex for thread safety
 	expireCheckInterval time.Duration        // Interval for cleaning up expired items
 	closed              atomic.Bool
 
@@ -38,6 +42,7 @@ type MemoryCache[K comparable, V any] struct {
 	pendingDeleteCh chan K
 
 	contextCancelFunc context.CancelFunc
+	mutex             sync.RWMutex   // Mutex for thread safety
 	wg                sync.WaitGroup // WaitGroup for managing goroutines
 }
 
@@ -49,7 +54,7 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 	}
 
 	if expireCheckInterval <= 0 {
-		expireCheckInterval = DefaultTTL
+		expireCheckInterval = DefaultExpireCheckInterval
 	}
 
 	if maxItems <= 0 {
@@ -245,9 +250,12 @@ func (m *MemoryCache[K, V]) evictLRU() {
 	m.size.Add(-1)
 }
 
-// collector runs in the background to periodically remove expired items from the cache.
-// It uses a ticker to trigger expiration checks at regular intervals, ensuring the cache stays clean.
-// The collector stops running when the parent context signals cancellation, allowing graceful shutdown.
+// collector runs in a background goroutine for the lifetime of the cache.
+// On each ticker tick it drains pendingDelete and purges elapsed heap entries.
+// ctx.Done() is the only exit path; removing the per-item pendingDelete case
+// from the select prevents channel starvation under high load, where a
+// continuously refilled channel would keep the collector from ever seeing
+// ctx.Done() and cause Close to deadlock waiting on wg.Wait.
 func (m *MemoryCache[K, V]) collector(ctx context.Context) {
 	ticker := time.NewTicker(m.expireCheckInterval)
 	defer ticker.Stop()
@@ -256,9 +264,11 @@ func (m *MemoryCache[K, V]) collector(ctx context.Context) {
 	// This loop will run until the parent context is canceled, allowing graceful shutdown.
 	for {
 		select {
-		// On every ticker tick, call deleteExpiredData to remove expired items from the cache.
+		// On every ticker tick, call deleteExpiredData and drainPending to remove expired items from the cache,
+		// as well as those items that are already pending deletion in the channel.
 		// This periodically cleans up stale entries without blocking the main cache operations.
 		case <-ticker.C:
+			m.drainPending()
 			m.deleteExpiredData()
 
 		// If the parent context signals done, exit the collector to stop cleanup activities.
