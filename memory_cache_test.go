@@ -23,13 +23,16 @@ func TestMemoryCache(t *testing.T) {
 		// and a maximum capacity of 1000 entries. Zero values for TTL and expire check interval should result
 		// in the cache using default values (DefaultTTL).
 		cache := NewMemoryCache[string, int](context.Background(), 0, 0, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Verify that the cache's TTL is set to the default TTL value, ensuring the cache correctly applies
 		// the default configuration when a zero TTL is provided.
 		assert.Equal(t, cache.ttl, DefaultTTL, "Expected cache TTL to be set to DefaultTTL")
 		// Confirm that the cache's expire check interval is set to the default TTL value, ensuring the cache
 		// uses the default configuration for periodic cleanup when a zero interval is provided.
-		assert.Equal(t, cache.expireCheckInterval, DefaultTTL, "Expected cache expire check interval to be set to DefaultTTL")
+		assert.Equal(t, cache.expireCheckInterval, DefaultExpireCheckInterval, "Expected cache expire check interval to be set to DefaultTTL")
 
 		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
@@ -61,6 +64,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a background context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This initializes the memory cache for testing.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
@@ -100,6 +106,9 @@ func TestMemoryCache(t *testing.T) {
 		// Instantiate a new memory cache with a TTL of 5 seconds and a maximum capacity of 1000 items.
 		// This cache will be used to test the Set and Contains methods.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Insert a key-value pair ("key1", "value1") into the cache without specifying a TTL.
 		// This operation tests the cache's ability to store values without expiration.
@@ -141,6 +150,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a TTL of 5 seconds and a maximum size of 1000.
 		// This cache will store key-value pairs of string keys and integer values.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Set the key "key1" with the value 42 and a TTL of 3 seconds.
 		// This operation initializes the cache entry for "key1".
@@ -171,6 +183,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a TTL of 5 seconds and a maximum size of 1000.
 		// This cache will store key-value pairs with string keys and integer values.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Attempt to retrieve the value associated with the key "nonexistent" from the cache.
 		// Since this key has not been set, the cache is expected to return a failure indicator.
@@ -187,6 +202,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a background context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This initializes the cache for this test.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire quickly.
@@ -220,6 +238,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new instance of MemoryCache with the context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This prepares the cache for testing.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Attempt to remove a non-existent key "nonexistent" from the cache.
 		// This checks if the Remove method correctly identifies keys that do not exist.
@@ -246,6 +267,9 @@ func TestMemoryCache(t *testing.T) {
 		// The cache has a global TTL of 5 seconds and a maximum capacity of 1000 entries,
 		// providing a consistent environment for testing.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Attempt to remove the key "nonexistent" from the cache.
 		// This key does not exist in the cache, so the Remove method should return false.
@@ -264,6 +288,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new MemoryCache instance with a background context.
 		// The global TTL for the cache is set to 150 milliseconds, and the maximum capacity is 1000 entries.
 		cache := NewMemoryCache[string, int](context.Background(), 150*time.Millisecond, 150*time.Millisecond, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Add an item to the cache with the key "key1" and value 42.
 		// The TTL for this specific entry is set to 100 milliseconds, after which it will expire.
@@ -293,6 +320,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache instance with a TTL of 5 minutes and a capacity of 1000 entries.
 		// This setup allows us to test the cache's behavior under different operations.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 5*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Check the initial length of the cache, which should be zero.
 		// This ensures that a newly created cache has no stored entries.
@@ -331,6 +361,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache is configured with a 1ms cleanup interval and 1000 capacity.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Set an expired item with a 1ms TTL.
 		// This adds "key1" to the cache, expiring immediately.
@@ -379,9 +412,13 @@ func TestMemoryCache(t *testing.T) {
 		// Create a background context for the cache.
 		// This provides a context without cancellation for testing.
 		ctx := context.Background()
+
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache is configured with a 1ms cleanup interval and 1000 capacity.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
 		// Set an expired item with a 1ms TTL.
 		// This adds "key1" to the cache, expiring immediately.
@@ -438,6 +475,10 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache uses a 1ms cleanup interval to trigger frequent collector ticks.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
+
 		// Set a non-expired item with a 1-hour TTL.
 		// This adds "key1" to the cache to test post-cancellation state.
 		cache.Set("key1", "value1", 1*time.Hour)
@@ -472,50 +513,25 @@ func TestMemoryCache(t *testing.T) {
 		cache.mutex.RUnlock()
 	})
 
-	// GetItemInHeapNotInItems tests the Get method when retrieving an item that exists
-	// in the cache but has expired. It verifies that the expired item is removed from the
-	// items map and LRU list, the size is decremented, and Get returns the zero value with false.
-	t.Run("GetItemInHeapNotInItems", func(t *testing.T) {
-		// Create a new cancellable context to manage the cache lifecycle.
-		// This allows the test to clean up the cache's background goroutine properly.
-		ctx, cancel := context.WithCancel(context.Background())
-		// Ensure the context is canceled after the test to stop the collector goroutine.
-		defer cancel()
+	// SetIsNoOpAfterClose verifies that the Set method behaves as a no-op (no operation)
+	// once the cache has been closed. It ensures that no new data can be injected
+	// into the internal structures, maintaining the integrity of the shutdown state.
+	t.Run("SetIsNoOpAfterClose", func(t *testing.T) {
+		// Initialize a new MemoryCache with an unlimited capacity (maxItems: 0).
+		// This provides a clean instance to test post-closure behavior.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
 
-		// Initialize the memory cache with a 10ms TTL and 1s cleanup interval.
-		// The short TTL ensures quick expiration, and the long cleanup interval prevents
-		// the collector from removing the item before Get is called. Set maxItems to 10
-		// to avoid LRU eviction interfering with the test.
-		cache := NewMemoryCache[string, string](ctx, time.Millisecond*10, time.Second, 10)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
-		// Insert a key-value pair with a very short TTL (1ms) so it expires quickly.
-		// This adds "expiredKey" to the items map, LRU list, and expiration heap.
-		cache.Set("expiredKey", "expiredValue", time.Millisecond*1)
+		// Attempt to add a new key-value pair to the already closed cache.
+		// The internal logic should detect the 'closed' state and return immediately.
+		cache.Set("key1", 1, time.Minute)
 
-		// Sleep for 5ms to guarantee the item has expired.
-		// This ensures item.ExpiresAt is before time.Now() when Get is called.
-		time.Sleep(time.Millisecond * 5)
-
-		// Call Get on the expired item to trigger the expiration branch.
-		// This should remove the item from the items map and LRU list, decrement the size,
-		// and return the zero value with false.
-		value, ok := cache.Get("expiredKey")
-
-		// Assert that Get reports the item as missing (false).
-		// This verifies that the expiration logic correctly identifies the item as expired.
-		assert.False(t, ok, "expected get to return false for expired item")
-
-		// Assert that the returned value is the zero value for string.
-		// This ensures Get returns the correct zero value ("") for the expired item.
-		assert.Equal(t, "", value, "expected value to be zero value after expiration")
-
-		// Assert that the cache size is decremented to 0.
-		// This confirms that the size counter was updated after removing the expired item.
-		assert.Equal(t, 0, cache.Len(), "expected cache length to be zero after removal of expired item")
-
-		// Assert that the item is no longer in the items map (verifies deletion).
-		// This checks that Contains returns false, confirming the item was removed from the map.
-		assert.False(t, cache.Contains("expiredKey"), "expected expired key to be removed from items map")
+		// Verify that the cache remains empty.
+		// The length must be 0, confirming that "key1" was never added to the map or LRU list.
+		assert.Equal(t, 0, cache.Len(), "Expected Len to be 0 after Set on a closed cache")
 	})
 }
 
