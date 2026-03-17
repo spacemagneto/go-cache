@@ -161,20 +161,29 @@ func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
 // This method acquires a lock to ensure thread safety while accessing the cache
 // and then checks if the key is present in the map of cached items.
 func (m *MemoryCache[K, V]) Contains(key K) bool {
-	// Acquire a read lock to ensure thread-safe access to the items map.
-	// This allows multiple readers to access the cache simultaneously without conflicts.
+	if m.closed.Load() {
+		return false
+	}
+
 	m.mutex.RLock()
-	// Ensure the read lock is released after the function executes, even in case of errors.
-	// Using defer guarantees proper cleanup and prevents potential deadlocks.
-	defer m.mutex.RUnlock()
+	element, ok := m.items[key]
+	if !ok {
+		m.mutex.RUnlock()
+		return false
+	}
 
-	// Check if the key exists in the items map and store the result in ok.
-	// This operation does not modify the cache and is efficient with the read lock held.
-	_, ok := m.items[key]
+	expired := element.Value.(*entry[K, V]).item.ExpiresAt.Before(time.Now())
+	m.mutex.RUnlock()
 
-	// Return the boolean value ok indicating whether the key exists in the cache.
-	// If ok is true, the key is present; otherwise, it is not.
-	return ok
+	if expired {
+		select {
+		case m.pendingDeleteCh <- key:
+		default:
+		}
+		return false
+	}
+
+	return true
 }
 
 // Remove removes an item from the cache by its key.
