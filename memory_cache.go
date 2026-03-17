@@ -122,9 +122,39 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 // If the item is found and has not expired, it is returned along with a boolean true.
 // If the item is not found or has expired, the zero value and boolean false are returned.
 func (m *MemoryCache[K, V]) Get(key K) (V, bool) {
-	var res V
+	var zero V
 
-	return res, true
+	if m.closed.Load() {
+		return zero, false
+	}
+
+	m.mutex.RLock()
+	element, ok := m.items[key]
+	if !ok {
+		m.mutex.RUnlock()
+		return zero, false
+	}
+
+	item := element.Value.(*entry[K, V]).item
+	expired := item.ExpiresAt.Before(time.Now())
+	m.mutex.RUnlock()
+
+	if expired {
+		select {
+		case m.pendingDeleteCh <- key:
+		default:
+		}
+		return zero, false
+	}
+
+	m.mutex.Lock()
+	// Re-check: the item may have been evicted between RUnlock and Lock.
+	if _, stillThere := m.items[key]; stillThere {
+		m.list.MoveToFront(element)
+	}
+	m.mutex.Unlock()
+
+	return item.Value, true
 }
 
 // Contains checks if a given key exists in the cache.
