@@ -593,6 +593,35 @@ func TestMemoryCache(t *testing.T) {
 		msg := <-cache.pendingDeleteCh
 		assert.Equal(t, "filler", msg, "The first item should be the filler, proving the expired key was dropped by default branch")
 	})
+
+	// ExpiredKeyReturnsFalse verifies that Contains returns false for a key whose
+	// TTL has elapsed, treating it the same as an absent key.
+	// This test ensures that the "lazy expiration" logic correctly identifies
+	// stale data during a read operation, providing a consistent view of the
+	// cache where expired items are effectively invisible.
+	t.Run("ExpiredKeyReturnsFalse", func(t *testing.T) {
+		// Initialize a new MemoryCache with a background context and standard intervals.
+		// We use a high capacity (0 for DefaultMaxItems) to ensure eviction doesn't
+		// interfere with the TTL-based expiration test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+
+		// Ensure the collector and internal resources are released upon test completion.
+		// This is a best practice to avoid side effects in a large test suite.
+		defer cache.Close()
+
+		// Insert "key1" with a very short 50ms TTL.
+		// This sets the expiration timestamp (ExpiresAt) in the internal item struct.
+		cache.Set("key1", 1, 50*time.Millisecond)
+
+		// Sleep for 100ms to guarantee that the system clock has moved past
+		// the item's expiration deadline.
+		time.Sleep(100 * time.Millisecond)
+
+		// Call Contains for the expired key.
+		// The internal logic should compare 'time.Now()' against 'item.ExpiresAt',
+		// find it lacking, and return false.
+		assert.False(t, cache.Contains("key1"), "Expected Contains to return false for a key whose TTL has elapsed")
+	})
 }
 
 // TestCollector groups tests that verify the background goroutine correctly
