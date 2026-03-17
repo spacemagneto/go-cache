@@ -102,7 +102,7 @@ func (m *MemoryCache[K, V]) Set(key K, value V, ttl time.Duration) {
 	defer m.mutex.Unlock()
 
 	if m.maxItems > 0 && int(m.size.Load()) >= m.maxItems {
-		m.evictLRULocked()
+		m.evictLRU()
 	}
 
 	if element, ok := m.items[key]; ok {
@@ -191,33 +191,13 @@ func (m *MemoryCache[K, V]) Contains(key K) bool {
 // the list and the map, as well as from the expiration buckets map.
 // It returns true if the item was found and removed, and false if the key does not exist in the cache.
 func (m *MemoryCache[K, V]) Remove(key K) bool {
-	// Acquire a write lock to ensure thread-safe modification of the cache.
-	// This prevents other goroutines from modifying the cache while the removal is in progress.
-	m.mutex.Lock()
-	// Ensure the lock is released after the function completes, even if an error occurs.
-	// Using defer guarantees that the lock will always be unlocked, avoiding potential deadlocks.
-	defer m.mutex.Unlock()
-
-	// Check if the key exists in the items map and retrieve its associated list element.
-	// If the key is present, the corresponding element will be returned in element.
-	if element, ok := m.items[key]; ok {
-		// Remove the element from the doubly-linked list (m.list).
-		// This operation updates the list structure and adjusts pointers for neighboring elements.
-		m.list.Remove(element)
-		// Remove the key from the items map to eliminate it from the cache.
-		// This ensures that the key is no longer accessible in the cache.
-		delete(m.items, key)
-		// Decrement the size of the cache to reflect the removal of an item.
-		// The cache size is updated atomically for thread-safe size tracking.
-		m.size.Add(-1)
-		// Note: The removed item remains in the expiration heap.
-		// It will be cleaned up later by the collector during heap maintenance.
-		return true
+	if m.closed.Load() {
+		return false
 	}
 
-	// Return false if the key does not exist in the cache.
-	// This indicates that no removal was performed because the key was not found.
-	return false
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.remove(key)
 }
 
 // Len retrieves the current number of items in the cache.
@@ -229,9 +209,24 @@ func (m *MemoryCache[K, V]) Len() int {
 	return int(m.size.Load())
 }
 
-// evictLRULocked removes the least-recently-used entry from the cache to make
-// room for a new item. Caller must hold mu for writing.
-func (m *MemoryCache[K, V]) evictLRULocked() {
+// remove removes key from the items map and the LRU list.
+// The heap entry is not touched here; it becomes a tombstone resolved lazily by
+// the collector.
+func (m *MemoryCache[K, V]) remove(key K) bool {
+	element, ok := m.items[key]
+	if !ok {
+		return false
+	}
+
+	m.list.Remove(element)
+	delete(m.items, key)
+	m.size.Add(-1)
+	return true
+}
+
+// evictLRU removes the least-recently-used entry from the cache to make
+// room for a new item.
+func (m *MemoryCache[K, V]) evictLRU() {
 	element := m.list.Back()
 	if element == nil {
 		return
