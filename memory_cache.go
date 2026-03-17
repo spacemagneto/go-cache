@@ -9,8 +9,11 @@ import (
 	"time"
 )
 
-// DefaultTTL is the default time-to-live duration for cache items.
-const DefaultTTL = 1 * time.Hour
+const (
+	// DefaultTTL is the default time-to-live duration for cache items.
+	DefaultTTL      = time.Hour
+	DefaultMaxItems = 10000
+)
 
 // MemoryCache represents an in-memory cache with TTL support and LRU eviction.
 type MemoryCache[K comparable, V any] struct {
@@ -29,12 +32,16 @@ type MemoryCache[K comparable, V any] struct {
 // NewMemoryCache creates a new MemoryCache instance with the specified TTL and max items.
 // It starts a background goroutine to periodically delete expired items.
 func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckInterval time.Duration, maxItems int) *MemoryCache[K, V] {
-	if ttl == 0 {
+	if ttl <= 0 {
 		ttl = DefaultTTL
 	}
 
-	if expireCheckInterval == 0 {
+	if expireCheckInterval <= 0 {
 		expireCheckInterval = DefaultTTL
+	}
+
+	if maxItems <= 0 {
+		maxItems = DefaultMaxItems
 	}
 
 	cache := &MemoryCache[K, V]{parentCtx: ctx, list: list.New(), items: make(map[K]*list.Element), expirationHeap: make(ExpirationHeap[K, V], 0), ttl: ttl, maxItems: maxItems, expireCheckInterval: expireCheckInterval}
