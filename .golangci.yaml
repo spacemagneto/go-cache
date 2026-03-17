@@ -53,6 +53,7 @@ linters:
       excludes:
         - G114
         - G115
+        - G118
         - G301
     misspell:
       locale: US

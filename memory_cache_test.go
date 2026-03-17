@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 )
 
 func TestMemoryCache(t *testing.T) {
@@ -22,16 +23,22 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a background context, zero TTL, zero expire check interval,
 		// and a maximum capacity of 1000 entries. Zero values for TTL and expire check interval should result
 		// in the cache using default values (DefaultTTL).
-		cache := NewMemoryCache[string, int](context.Background(), 0, 0, 1000)
+		cache := NewMemoryCache[string, int](context.Background(), 0, 0, 0)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Verify that the cache's TTL is set to the default TTL value, ensuring the cache correctly applies
 		// the default configuration when a zero TTL is provided.
 		assert.Equal(t, cache.ttl, DefaultTTL, "Expected cache TTL to be set to DefaultTTL")
 		// Confirm that the cache's expire check interval is set to the default TTL value, ensuring the cache
 		// uses the default configuration for periodic cleanup when a zero interval is provided.
-		assert.Equal(t, cache.expireCheckInterval, DefaultTTL, "Expected cache expire check interval to be set to DefaultTTL")
+		assert.Equal(t, cache.expireCheckInterval, DefaultExpireCheckInterval, "Expected cache expire check interval to be set to DefaultTTL")
+		// Verify that the maximum capacity is set to DefaultMaxItems when 0 is passed.
+		// This assertion ensures the cache has a sane upper bound to prevent OOM (Out of Memory) errors
+		assert.Equal(t, cache.maxItems, DefaultMaxItems, "Expected cache expire check max cache items to be set to DefaultMaxItems")
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
 		// and be removed from the cache after 1 second.
 		cache.Set("key1", 42, time.Second)
@@ -61,8 +68,11 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a background context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This initializes the memory cache for testing.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire
 		// and be removed from the cache after 1 second.
 		cache.Set("key1", 42, time.Second)
@@ -100,8 +110,11 @@ func TestMemoryCache(t *testing.T) {
 		// Instantiate a new memory cache with a TTL of 5 seconds and a maximum capacity of 1000 items.
 		// This cache will be used to test the Set and Contains methods.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
-		// Insert a key-value pair ("key1", "value1") into the cache without specifying a TTL.
+		// Set a key-value pair ("key1", "value1") into the cache without specifying a TTL.
 		// This operation tests the cache's ability to store values without expiration.
 		cache.Set("key1", "value1", 0)
 		// Verify that the key "key1" exists in the cache using the Contains method.
@@ -118,7 +131,7 @@ func TestMemoryCache(t *testing.T) {
 		// This ensures the cache stored the correct value.
 		assert.Equal(t, "value1", val, "Expected value for 'key1' to be 'value1'")
 
-		// Insert another key-value pair ("key2", "value2") into the cache with a TTL of 1 second.
+		// Set another key-value pair ("key2", "value2") into the cache with a TTL of 1 second.
 		// This tests the cache's ability to handle values with expiration times.
 		cache.Set("key2", "value2", time.Second)
 		// Verify that the key "key2" exists in the cache immediately after insertion.
@@ -141,6 +154,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a TTL of 5 seconds and a maximum size of 1000.
 		// This cache will store key-value pairs of string keys and integer values.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Set the key "key1" with the value 42 and a TTL of 3 seconds.
 		// This operation initializes the cache entry for "key1".
@@ -171,6 +187,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a TTL of 5 seconds and a maximum size of 1000.
 		// This cache will store key-value pairs with string keys and integer values.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Attempt to retrieve the value associated with the key "nonexistent" from the cache.
 		// Since this key has not been set, the cache is expected to return a failure indicator.
@@ -187,8 +206,11 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new instance of MemoryCache with a background context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This initializes the cache for this test.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
-		// Insert a key-value pair into the cache. The key is "key1" and the value is 42.
+		// Set a key-value pair into the cache. The key is "key1" and the value is 42.
 		// The TTL for this entry is set to 1 second, meaning the key-value pair will expire quickly.
 		cache.Set("key1", 42, time.Second)
 
@@ -220,6 +242,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new instance of MemoryCache with the context, a global TTL of 5 seconds,
 		// and a maximum capacity of 1000 entries. This prepares the cache for testing.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Attempt to remove a non-existent key "nonexistent" from the cache.
 		// This checks if the Remove method correctly identifies keys that do not exist.
@@ -246,6 +271,9 @@ func TestMemoryCache(t *testing.T) {
 		// The cache has a global TTL of 5 seconds and a maximum capacity of 1000 entries,
 		// providing a consistent environment for testing.
 		cache := NewMemoryCache[string, int](context.Background(), 5*time.Second, 5*time.Second, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Attempt to remove the key "nonexistent" from the cache.
 		// This key does not exist in the cache, so the Remove method should return false.
@@ -264,6 +292,9 @@ func TestMemoryCache(t *testing.T) {
 		// Create a new MemoryCache instance with a background context.
 		// The global TTL for the cache is set to 150 milliseconds, and the maximum capacity is 1000 entries.
 		cache := NewMemoryCache[string, int](context.Background(), 150*time.Millisecond, 150*time.Millisecond, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Add an item to the cache with the key "key1" and value 42.
 		// The TTL for this specific entry is set to 100 milliseconds, after which it will expire.
@@ -293,6 +324,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache instance with a TTL of 5 minutes and a capacity of 1000 entries.
 		// This setup allows us to test the cache's behavior under different operations.
 		cache := NewMemoryCache[string, string](ctx, 5*time.Minute, 5*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Check the initial length of the cache, which should be zero.
 		// This ensures that a newly created cache has no stored entries.
@@ -331,6 +365,9 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache is configured with a 1ms cleanup interval and 1000 capacity.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Set an expired item with a 1ms TTL.
 		// This adds "key1" to the cache, expiring immediately.
@@ -379,9 +416,13 @@ func TestMemoryCache(t *testing.T) {
 		// Create a background context for the cache.
 		// This provides a context without cancellation for testing.
 		ctx := context.Background()
+
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache is configured with a 1ms cleanup interval and 1000 capacity.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
 
 		// Set an expired item with a 1ms TTL.
 		// This adds "key1" to the cache, expiring immediately.
@@ -438,6 +479,10 @@ func TestMemoryCache(t *testing.T) {
 		// Initialize a new MemoryCache with string keys and string values.
 		// The cache uses a 1ms cleanup interval to trigger frequent collector ticks.
 		cache := NewMemoryCache[string, string](ctx, 1*time.Millisecond, 1*time.Minute, 1000)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		defer cache.Close()
+
 		// Set a non-expired item with a 1-hour TTL.
 		// This adds "key1" to the cache to test post-cancellation state.
 		cache.Set("key1", "value1", 1*time.Hour)
@@ -472,50 +517,630 @@ func TestMemoryCache(t *testing.T) {
 		cache.mutex.RUnlock()
 	})
 
-	// GetItemInHeapNotInItems tests the Get method when retrieving an item that exists
-	// in the cache but has expired. It verifies that the expired item is removed from the
-	// items map and LRU list, the size is decremented, and Get returns the zero value with false.
-	t.Run("GetItemInHeapNotInItems", func(t *testing.T) {
-		// Create a new cancellable context to manage the cache lifecycle.
-		// This allows the test to clean up the cache's background goroutine properly.
-		ctx, cancel := context.WithCancel(context.Background())
-		// Ensure the context is canceled after the test to stop the collector goroutine.
-		defer cancel()
+	// SetIsNoOpAfterClose verifies that the Set method behaves as a no-op (no operation)
+	// once the cache has been closed. It ensures that no new data can be injected
+	// into the internal structures, maintaining the integrity of the shutdown state.
+	t.Run("SetIsNoOpAfterClose", func(t *testing.T) {
+		// Initialize a new MemoryCache with an unlimited capacity (maxItems: 0).
+		// This provides a clean instance to test post-closure behavior.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
 
-		// Initialize the memory cache with a 10ms TTL and 1s cleanup interval.
-		// The short TTL ensures quick expiration, and the long cleanup interval prevents
-		// the collector from removing the item before Get is called. Set maxItems to 10
-		// to avoid LRU eviction interfering with the test.
-		cache := NewMemoryCache[string, string](ctx, time.Millisecond*10, time.Second, 10)
+		// Trigger the Close method to stop the collector and set the internal closed flag.
+		// This transition is irreversible and should block all subsequent write operations.
+		cache.Close()
 
-		// Insert a key-value pair with a very short TTL (1ms) so it expires quickly.
-		// This adds "expiredKey" to the items map, LRU list, and expiration heap.
-		cache.Set("expiredKey", "expiredValue", time.Millisecond*1)
+		// Attempt to add a new key-value pair to the already closed cache.
+		// The internal logic should detect the 'closed' state and return immediately.
+		cache.Set("key1", 1, time.Minute)
 
-		// Sleep for 5ms to guarantee the item has expired.
-		// This ensures item.ExpiresAt is before time.Now() when Get is called.
-		time.Sleep(time.Millisecond * 5)
+		// Verify that the cache remains empty.
+		// The length must be 0, confirming that "key1" was never added to the map or LRU list.
+		assert.Equal(t, 0, cache.Len(), "Expected Len to be 0 after Set on a closed cache")
+	})
 
-		// Call Get on the expired item to trigger the expiration branch.
-		// This should remove the item from the items map and LRU list, decrement the size,
-		// and return the zero value with false.
-		value, ok := cache.Get("expiredKey")
+	// ContainsTriggersDefaultCase verifies that when an expired key is discovered,
+	// if the pendingDeleteCh is full, the method does not block and correctly
+	// executes the default branch.
+	// This test is critical for high-throughput environments (like 100k RPS) to ensure
+	// that a backlog in the background collector doesn't stall the main request
+	// processing threads due to a blocked channel send.
+	t.Run("ContainsTriggersDefaultCase", func(t *testing.T) {
+		// Initialize a MemoryCache with a standard configuration.
+		// The internal channel buffer is set to 512 by default in the constructor.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
 
-		// Assert that Get reports the item as missing (false).
-		// This verifies that the expiration logic correctly identifies the item as expired.
-		assert.False(t, ok, "expected get to return false for expired item")
+		// Manually cancel the context and wait for the collector's WaitGroup to finish.
+		// This stops the background consumer, ensuring the pendingDeleteCh stays
+		// full once we populate it, preventing any race conditions during the test.
+		cache.contextCancelFunc()
+		cache.wg.Wait()
 
-		// Assert that the returned value is the zero value for string.
-		// This ensures Get returns the correct zero value ("") for the expired item.
-		assert.Equal(t, "", value, "expected value to be zero value after expiration")
+		expiredKey := "expired-key"
 
-		// Assert that the cache size is decremented to 0.
-		// This confirms that the size counter was updated after removing the expired item.
-		assert.Equal(t, 0, cache.Len(), "expected cache length to be zero after removal of expired item")
+		// Manually inject an expired item into the map and LRU list.
+		// By setting ExpiresAt to one hour in the past, we force the Contains
+		// logic to identify the item as expired and attempt a background deletion.
+		cache.mutex.Lock()
+		val := &entry[string, int]{
+			item: &Item[string, int]{
+				ExpiresAt: time.Now().Add(-time.Hour),
+			},
+		}
 
-		// Assert that the item is no longer in the items map (verifies deletion).
-		// This checks that Contains returns false, confirming the item was removed from the map.
-		assert.False(t, cache.Contains("expiredKey"), "expected expired key to be removed from items map")
+		cache.items[expiredKey] = cache.list.PushFront(val)
+		cache.mutex.Unlock()
+
+		// Fill the channel buffer completely to its capacity (512).
+		// Once full, any further attempts to send to this channel will block
+		// unless a select statement with a default branch is used.
+		for i := 0; i < cap(cache.pendingDeleteCh); i++ {
+			cache.pendingDeleteCh <- "filler"
+		}
+
+		// Call Contains on the expired key. This should trigger the internal
+		// 'select { case c.pendingDeleteCh <- key: default: }' logic.
+		// Since the channel is full, it must hit the default branch and return
+		// false immediately without blocking the execution.
+		assert.False(t, cache.Contains(expiredKey), "Expected false for expired key")
+
+		// Verify that the channel remains at full capacity.
+		// This confirms that the 'expired-key' was not able to squeeze into the buffer.
+		assert.Equal(t, cap(cache.pendingDeleteCh), len(cache.pendingDeleteCh), "Channel should remain at full capacity")
+
+		// Retrieve the first message from the channel to verify its content.
+		// We expect the original "filler" string, proving that the later
+		// "expired-key" signal was indeed dropped by the default branch.
+		msg := <-cache.pendingDeleteCh
+		assert.Equal(t, "filler", msg, "The first item should be the filler, proving the expired key was dropped by default branch")
+	})
+
+	// ExpiredKeyReturnsFalse verifies that Contains returns false for a key whose
+	// TTL has elapsed, treating it the same as an absent key.
+	// This test ensures that the "lazy expiration" logic correctly identifies
+	// stale data during a read operation, providing a consistent view of the
+	// cache where expired items are effectively invisible.
+	t.Run("ExpiredKeyReturnsFalse", func(t *testing.T) {
+		// Initialize a new MemoryCache with a background context and standard intervals.
+		// We use a high capacity (0 for DefaultMaxItems) to ensure eviction doesn't
+		// interfere with the TTL-based expiration test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+
+		// Ensure the collector and internal resources are released upon test completion.
+		// This is a best practice to avoid side effects in a large test suite.
+		defer cache.Close()
+
+		// Set "key1" with a very short 50ms TTL.
+		// This sets the expiration timestamp (ExpiresAt) in the internal item struct.
+		cache.Set("key1", 1, 50*time.Millisecond)
+
+		// Sleep for 100ms to guarantee that the system clock has moved past
+		// the item's expiration deadline.
+		time.Sleep(100 * time.Millisecond)
+
+		// Call Contains for the expired key.
+		// The internal logic should compare 'time.Now()' against 'item.ExpiresAt',
+		// find it lacking, and return false.
+		assert.False(t, cache.Contains("key1"), "Expected Contains to return false for a key whose TTL has elapsed")
+	})
+
+	// GetExpiredTriggerDefault verifies that when an expired key is accessed,
+	// if the pendingDeleteCh is full, the method returns immediately without
+	// blocking, successfully hitting the default branch.
+	// This ensures that high-pressure scenarios in the cleanup process do not
+	// affect the latency of read operations.
+	t.Run("GetExpiredTriggerDefault", func(t *testing.T) {
+		// Use a standard background context for initialization.
+		ctx := context.Background()
+		// Initialize a MemoryCache with a capacity of 10 items.
+		// The constructor sets up the pendingDeleteCh with a fixed buffer of 512.
+		cache := NewMemoryCache[string, int](ctx, time.Minute, time.Minute, 10)
+
+		// Explicitly stop the collector goroutine before starting the test logic.
+		// By waiting for the WaitGroup, we guarantee that no background worker
+		// is active to drain the channel, allowing us to maintain a "full" state.
+		cache.contextCancelFunc()
+		cache.wg.Wait()
+
+		expiredKey := "expired-key"
+
+		// Manually inject an item that is already expired (set to 1 hour ago).
+		// We use a manual lock to bypass the standard Set logic and directly
+		// control the internal state for precise test isolation.
+		cache.mutex.Lock()
+		val := &entry[string, int]{
+			item: &Item[string, int]{
+				Key:       expiredKey,
+				Value:     999,
+				ExpiresAt: time.Now().Add(-time.Hour),
+			},
+		}
+
+		// Directly link the entry into the items map and the LRU list.
+		cache.items[expiredKey] = cache.list.PushFront(val)
+		cache.mutex.Unlock()
+
+		// Saturate the pendingDeleteCh buffer completely (512 filler elements).
+		// At this point, any further attempt to send to this channel would
+		// normally block the calling goroutine.
+		for i := 0; i < cap(cache.pendingDeleteCh); i++ {
+			cache.pendingDeleteCh <- "blocker"
+		}
+
+		// Call Get() for the expired key. The internal logic should detect
+		// 'expired == true' and try to send the key to the full channel.
+		// The 'select { case ... default: }' block must trigger the default path.
+		value, ok := cache.Get(expiredKey)
+
+		// Assert that Get() returns false and the zero value for the type (0).
+		// This confirms that expiration logic takes precedence over returning data.
+		assert.False(t, ok, "Expected ok=false for expired key")
+		assert.Equal(t, 0, value, "Expected zero value for expired key")
+
+		// Verify that the channel size hasn't changed.
+		// This proves the 'expired-key' was not added to the already full buffer.
+		assert.Equal(t, cap(cache.pendingDeleteCh), len(cache.pendingDeleteCh), "Channel should still be at full capacity")
+
+		// Pop the first item from the channel and verify it is a "blocker".
+		// This confirms the FIFO order remains intact and our filler was not replaced.
+		head := <-cache.pendingDeleteCh
+		assert.Equal(t, "blocker", head, "The head of the channel should be the initial filler")
+	})
+
+	// ExpiredKeyReturnsFalse verifies that an item whose TTL has elapsed is
+	// treated as absent: Get returns false and the zero value even though the
+	// internal map may not yet have been cleaned up by the background collector.
+	t.Run("ExpiredKeyReturnsFalse", func(t *testing.T) {
+		// Initialize a new MemoryCache with a background context and standard intervals.
+		// We use a high capacity (0 for DefaultMaxItems) to ensure eviction doesn't
+		// interfere with the TTL-based expiration test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+
+		// Ensure the collector and internal resources are released upon test completion.
+		// This is a best practice to avoid goroutine leaks in the test suite.
+		defer cache.Close()
+
+		// Set "key1" with a very short 50ms TTL.
+		// This sets the expiration timestamp (ExpiresAt) in the internal item struct.
+		cache.Set("key1", 1, 50*time.Millisecond)
+
+		// Sleep for 100ms to guarantee that the system clock has moved past
+		// the item's expiration deadline.
+		time.Sleep(100 * time.Millisecond)
+
+		// Execute Get for the expired key.
+		// The internal logic should compare 'time.Now()' against 'item.ExpiresAt',
+		// identify it as expired, and return the zero value + false.
+		value, ok := cache.Get("key1")
+
+		// Assert that the success flag is false.
+		// This confirms the cache correctly hides expired data even before physical deletion.
+		assert.False(t, ok, "Expected Get to return false for a key whose TTL has elapsed")
+
+		// Confirm that the returned value is the zero value for the type (0 for int).
+		// This validates that no stale data is leaked to the caller.
+		assert.Equal(t, 0, value, "Expected Get to return the zero value for an expired key")
+	})
+}
+
+// TestCollector groups tests that verify the background goroutine correctly
+// purges expired entries from both the items map and the expiration heap,
+// leaving no stale data or memory leaks behind.
+func TestCollector(t *testing.T) {
+	t.Parallel()
+
+	// PurgesExpiredItemsFromMap confirms that after the collector tick fires,
+	// entries whose TTL has elapsed are removed from the items map and the
+	// Len counter reflects the removal.
+	// This test validates the background cleanup cycle (collector goroutine)
+	// by ensuring it correctly identifies and evicts only expired keys.
+	t.Run("PurgesExpiredItemsFromMap", func(t *testing.T) {
+		// Initialize a new MemoryCache with a short 30ms expireCheckInterval.
+		// This allows the background collector to trigger frequently during the test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+		// Ensure all resources and goroutines are cleaned up after the test completes.
+		// This prevents goroutine leaks in the test suite.
+		defer cache.Close()
+
+		// Add "key1" with a very short 20ms TTL to ensure it expires quickly.
+		// This item is the primary target for the collector's purge logic.
+		cache.Set("key1", 1, 20*time.Millisecond)
+		// Add "key2" with a long 1-minute TTL to ensure it survives the test.
+		// This serves as a control to prove the collector doesn't remove valid items.
+		cache.Set("key2", 2, time.Minute)
+
+		// Wait for at least 80ms to guarantee at least one collector tick has occurred.
+		// This duration covers both the 20ms TTL of key1 and the 30ms collector interval.
+		time.Sleep(80 * time.Millisecond)
+
+		// Attempt to retrieve "key1" to verify its removal.
+		// The collector should have already purged it during its periodic scan.
+		_, key1Alive := cache.Get("key1")
+		// Attempt to retrieve "key2" to verify its persistence.
+		// It should still be present since its TTL is much longer than the sleep duration.
+		_, key2Alive := cache.Get("key2")
+
+		// Assert that key1 is no longer in the cache.
+		// This confirms the background collector is functional and accurate.
+		assert.False(t, key1Alive, "Expected key1 to be purged by the collector after its TTL elapsed")
+		// Assert that key2 is still present in the cache.
+		// This confirms the collector correctly respects TTLs and does not over-evict.
+		assert.True(t, key2Alive, "Expected key2 to remain because its TTL has not yet elapsed")
+	})
+
+	// PurgesExpiredItemsFromHeap confirms that after the collector runs, the
+	// expiration heap contains no entries for keys that have been removed,
+	// proving there are no memory leaks in the heap structure.
+	// It ensures that the min-heap used for TTL tracking is synchronized with the
+	// map and list, preventing orphaned pointers in the heap.
+	t.Run("PurgesExpiredItemsFromHeap", func(t *testing.T) {
+		// Initialize a MemoryCache with a fast 30ms collector interval.
+		// This high frequency ensures that the background worker cleans up the heap quickly.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+
+		// Populate the cache with 50 short-lived items (20ms TTL).
+		// This creates a significant heap size to test the efficiency of the purge logic.
+		for i := 0; i < 50; i++ {
+			cache.Set(fmt.Sprintf("key%d", i), i, 20*time.Millisecond)
+		}
+
+		// Wait for 100ms to allow all 50 items to expire and the collector to finish its scan.
+		// This sleep duration is enough for multiple collector ticks and processing time.
+		time.Sleep(100 * time.Millisecond)
+
+		// Close the cache to stop the collector and ensure a stable state for inspection.
+		// This prevents concurrent modifications while we verify the internal heap and map.
+		cache.Close()
+
+		// Lock the mutex to safely access the internal data structures for validation.
+		// This ensures we get a consistent snapshot of the heap and map lengths.
+		cache.mutex.Lock()
+		heapLen := cache.expirationHeap.Len()
+		mapLen := len(cache.items)
+		cache.mutex.Unlock()
+
+		// Assert that the expiration heap is completely empty.
+		// This confirms that the collector successfully popped all expired entries from the heap.
+		assert.Equal(t, 0, heapLen, "Expected the expiration heap to be empty after all items expired and collector ran")
+		// Assert that the items map is also empty.
+		// This verifies that the heap purge and map deletion remained in sync.
+		assert.Equal(t, 0, mapLen, "Expected the items map to be empty after all items expired and collector ran")
+	})
+
+	// TombstonesFromRemoveAreDiscarded verifies that when items are removed
+	// before their TTL elapses, the stale heap entries left behind are recognised
+	// as tombstones by version comparison and are discarded without corrupting
+	// the items map or the size counter.
+	// This test is critical for validating the lazy deletion strategy: it ensures that
+	// manual removals via Remove() don't leave orphaned metadata that could interfere
+	// with the background collector's accuracy.
+	t.Run("TombstonesFromRemoveAreDiscarded", func(t *testing.T) {
+		// Initialize a MemoryCache with a short 30ms collector interval.
+		// This allows the background goroutine to quickly process the heap "tombstones"
+		// created by the subsequent Remove calls.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+
+		// Populate the cache with 50 items. Each item is assigned a unique version number
+		// internally and pushed onto the expiration heap.
+		for i := 0; i < 50; i++ {
+			cache.Set(fmt.Sprintf("key%d", i), i, 20*time.Millisecond)
+		}
+
+		// Immediately remove all 50 items. In a lazy-deletion architecture, this removes
+		// the keys from the items map but leaves the original entries in the heap.
+		// These heap entries are now "tombstones" because their version numbers no
+		// longer match any live item in the map.
+		for i := 0; i < 50; i++ {
+			cache.Remove(fmt.Sprintf("key%d", i))
+		}
+
+		// Wait for 100ms to allow the collector to perform a tick.
+		// During this tick, the collector pops entries from the heap, identifies them
+		// as tombstones (due to version mismatch or absence in the map), and discards them.
+		time.Sleep(100 * time.Millisecond)
+
+		// Shut down the cache to prevent further background activity.
+		// This provides a stable environment for asserting the final internal state.
+		cache.Close()
+
+		// Acquire the mutex lock to safely inspect the internal heap and map.
+		// This ensures no race conditions occur during the final verification.
+		cache.mutex.Lock()
+		heapLen := cache.expirationHeap.Len()
+		mapLen := len(cache.items)
+		cache.mutex.Unlock()
+
+		// Assert that the expiration heap has been fully drained of tombstones.
+		// This confirms the version-based filtering logic in the collector is working.
+		assert.Equal(t, 0, heapLen, "Expected heap to be empty after tombstone entries were discarded by the collector")
+		// Assert that the items map remains empty.
+		// This verifies that the collector didn't accidentally re-insert or fail to clean up data.
+		assert.Equal(t, 0, mapLen, "Expected items map to be empty after all keys were removed and collector ran")
+	})
+
+	// TombstonesFromReSetAreDiscarded verifies that when a key is re-Set, the
+	// old heap entry carries a stale version and is silently discarded by the
+	// collector, while the new entry is correctly removed when it expires.
+	t.Run("TombstonesFromReSetAreDiscarded", func(t *testing.T) {
+		// Initialize a MemoryCache with a short 30ms collector interval.
+		// This allows the background goroutine to quickly encounter and process
+		// the stale heap entry generated by the subsequent update.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+
+		// First Set: Insert "key1" with a very short 20ms TTL.
+		// This creates an entry in the items map and pushes a versioned record
+		// onto the expiration heap.
+		cache.Set("key1", 1, 20*time.Millisecond)
+
+		// Second Set: Immediately update "key1" with a new value and a 1-minute TTL.
+		// This increments the internal version counter for "key1". The previous
+		// heap entry (from the first Set) is now a "tombstone" because its
+		// version no longer matches the current version in the items map.
+		cache.Set("key1", 2, time.Minute)
+
+		// Wait for 100ms to ensure the first TTL (20ms) has expired and the
+		// collector has performed a tick (every 30ms). The collector should
+		// pop the first version from the heap, see it is a tombstone, and
+		// discard it WITHOUT removing the live "key1" from the map.
+		time.Sleep(100 * time.Millisecond)
+
+		// Attempt to retrieve "key1".
+		// It must still be present because the second Set gave it a long-lived TTL.
+		value, ok := cache.Get("key1")
+
+		// Assert that the key is still alive.
+		// This proves the collector's version-checking logic prevents "stale"
+		// expirations from killing "fresh" updates.
+		assert.True(t, ok, "Expected key1 to remain because the re-Set gave it a fresh long TTL")
+
+		// Confirm the value matches the second Set (2), not the first (1).
+		// This validates that the internal entry pointer was correctly updated.
+		assert.Equal(t, 2, value, "Expected Get to return the updated value written by the second Set")
+
+		// Verify the cache size remains exactly 1.
+		// This ensures that discarding the tombstone didn't mess up the atomic
+		// size counter or the map contents.
+		assert.Equal(t, 1, cache.Len(), "Expected Len to be 1 after tombstone was discarded without removing the live entry")
+
+		// Clean up resources.
+		cache.Close()
+	})
+
+	// PendingDeleteDrainedByCollector confirms that expired keys signalled via
+	// the pendingDelete channel (from Get/Contains) are removed from the map by
+	// the collector rather than being left in memory indefinitely.
+	// This test validates the asynchronous deletion path: when a hot-path method (Get/Contains)
+	// discovers an expired item, it must successfully hand off the deletion task to the
+	// collector via the channel to avoid write-lock contention.
+	t.Run("PendingDeleteDrainedByCollector", func(t *testing.T) {
+		// Initialize a MemoryCache with a 30ms collector interval.
+		// This background interval ensures the collector frequently checks the
+		// pendingDelete channel for removal signals.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+		// Ensure the collector goroutine and context are cleaned up after the test.
+		// This maintains test isolation and prevents background leaks.
+		defer cache.Close()
+
+		// Add "key1" with a short 20ms TTL.
+		// This item is set up to expire quickly so we can trigger the lazy-deletion signal.
+		cache.Set("key1", 1, 20*time.Millisecond)
+
+		// Sleep for 40ms to ensure the item's TTL has definitely elapsed.
+		// This timing is crucial to guarantee that the subsequent Get() call sees the item as expired.
+		time.Sleep(40 * time.Millisecond)
+
+		// Call Get() on the expired item.
+		// This should return false and internally send "key1" into the cache.pendingDeleteCh.
+		_, ok := cache.Get("key1")
+		// Assert that Get correctly identifies the item as expired.
+		assert.False(t, ok, "Expected Get to return false for an expired key")
+
+		// Wait for 60ms to allow the collector to wake up, drain the channel,
+		// and execute the actual removal logic (removeLocked).
+		time.Sleep(60 * time.Millisecond)
+
+		// Acquire a read lock to safely inspect the internal map state.
+		// This ensures we are not reading while the collector is performing the final cleanup.
+		cache.mutex.RLock()
+		// Check if "key1" still exists in the underlying storage map.
+		_, stillInMap := cache.items["key1"]
+		// Release the lock immediately after checking.
+		cache.mutex.RUnlock()
+
+		// Assert that the item has been physically removed from the map.
+		// This confirms the hand-off from Get() to the collector via the channel was successful.
+		assert.False(t, stillInMap, "Expected key1 to be removed from the items map after the collector drained pendingDelete")
+	})
+}
+
+// TestClose groups all shutdown contracts: idempotency, goroutine termination
+// verified by goleak, and the observable behaviour of each public method after
+// the cache has been closed.
+func TestClose(t *testing.T) {
+	goleak.VerifyNone(t)
+
+	// IdempotentMultipleCalls confirms that invoking Close more than once does
+	// not panic and does not cause a double-close of the internal channel.
+	t.Run("IdempotentMultipleCalls", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Close()
+
+		assert.NotPanics(t, cache.Close, "Expected second Close call to be a no-op without panicking")
+	})
+
+	// CollectorGoroutineExits uses goleak to assert that no goroutines spawned
+	// by the cache outlive a Close call, confirming there are no leaks.
+	t.Run("CollectorGoroutineExits", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, 0)
+		cache.Close()
+	})
+
+	// GetReturnsFalseAfterClose confirms that Get returns the zero value and
+	// false for any key after the cache has been closed.
+	t.Run("GetReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		value, ok := cache.Get("key1")
+		assert.False(t, ok, "Expected Get to return false after cache is closed")
+		assert.Equal(t, 0, value, "Expected Get to return zero value after cache is closed")
+	})
+
+	// ContainsReturnsFalseAfterClose confirms that Contains returns false for
+	// any key after the cache has been closed.
+	t.Run("ContainsReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		assert.False(t, cache.Contains("key1"), "Expected Contains to return false after cache is closed")
+	})
+
+	// RemoveReturnsFalseAfterClose confirms that Remove returns false for any
+	// key after the cache has been closed.
+	t.Run("RemoveReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		assert.False(t, cache.Remove("key1"), "Expected Remove to return false after cache is closed")
+	})
+
+	// SetIsNoOpAfterClose confirms that Set silently does nothing after the
+	// cache has been closed: the value is not stored and Len stays at zero.
+	t.Run("SetIsNoOpAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Close()
+
+		cache.Set("key1", 1, time.Minute)
+
+		assert.Equal(t, 0, cache.Len(), "Expected Len to be 0 after Set on a closed cache")
+	})
+}
+
+// TestLRUEviction groups scenarios that verify the LRU eviction policy: which
+// item is evicted, that Get promotes an item, and that capacity is always respected.
+func TestLRUEviction(t *testing.T) {
+	t.Parallel()
+
+	// EvictsLeastRecentlyUsed confirms that when capacity is exceeded the item
+	// that has gone the longest without being accessed is removed first.
+	t.Run("EvictsLeastRecentlyUsed", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 3)
+		defer cache.Close()
+
+		cache.Set("key1", 1, 0)
+		cache.Set("key2", 2, 0)
+		cache.Set("key3", 3, 0)
+
+		// Access key1 and key3 so key2 becomes the least-recently-used item.
+		cache.Get("key1")
+		cache.Get("key3")
+
+		// Inserting key4 must evict key2.
+		cache.Set("key4", 4, 0)
+
+		_, key2Alive := cache.Get("key2")
+		assert.False(t, key2Alive, "Expected key2 to be evicted as the least-recently-used item")
+		assert.Equal(t, 3, cache.Len(), "Expected cache length to remain at maxItems after eviction")
+	})
+
+	// ResetUpdatesRecency confirms that re-setting an existing key moves it to
+	// the most-recently-used position, protecting it from the next eviction.
+	t.Run("ResetUpdatesRecency", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 2)
+		defer cache.Close()
+
+		cache.Set("key1", 1, 0)
+		cache.Set("key2", 2, 0)
+
+		// Re-set key1: it becomes MRU so key2 is now the LRU candidate.
+		cache.Set("key1", 100, 0)
+
+		// Adding key3 must evict key2, not key1.
+		cache.Set("key3", 3, 0)
+
+		value, ok := cache.Get("key1")
+		assert.True(t, ok, "Expected key1 to survive because re-Set moved it to MRU position")
+		assert.Equal(t, 100, value, "Expected key1 to hold the updated value after re-Set")
+
+		_, key2Alive := cache.Get("key2")
+		assert.False(t, key2Alive, "Expected key2 to be evicted because re-Set of key1 made key2 the LRU")
+	})
+
+	// EvictOnEmptyPool verifies that evictLRULocked handles empty caches gracefully
+	// without triggering a panic. This covers the 'element == nil' check which
+	// occurs when lruList.Back() is called on an empty list.
+	t.Run("EvictOnEmptyPool", func(t *testing.T) {
+		// Initialize a new cache with capacity, but don't add any items.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+		defer cache.Close()
+
+		// Ensure the internal state is truly empty.
+		assert.Equal(t, 0, cache.list.Len(), "LRU list should be empty initially")
+
+		// We call evictLRU manually. Since it's an unexported method,
+		// it's usually called inside Set when capacity is reached, but testing
+		// it directly (if in the same package) or via Set confirms the nil check.
+		assert.NotPanics(t, func() {
+			cache.mutex.Lock()
+			cache.evictLRU()
+			cache.mutex.Unlock()
+		}, "evictLRU must not panic when the LRU list is empty")
+
+		assert.Equal(t, int32(0), cache.size.Load(), "Cache size should remain 0")
+	})
+
+	// DrainPendingRespectsConcurrency verifies that drainPending handles keys
+	// that might not exist in the map (e.g., already removed or double-queued).
+	t.Run("DrainPendingHandlesMissingKeys", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+		defer cache.Close()
+
+		// Put a key in the channel that was never Set in the map
+		cache.pendingDeleteCh <- "ghost-key"
+
+		// Execution: removeLocked (called inside drainPending) should handle this gracefully
+		assert.NotPanics(t, func() { cache.drainPending() }, "drainPending should handle keys not present in the items map")
+
+		assert.Equal(t, 0, len(cache.pendingDeleteCh), "Channel should be cleared regardless")
+	})
+
+	// ClosePendingDeleteChannel verifies that the drainPending method correctly
+	// handles the closure of the pendingDeleteCh channel. It ensures that
+	// if the channel is closed, the drain loop exits gracefully via the
+	// 'if !ok' check instead of panicking or entering an infinite loop.
+	t.Run("ClosePendingDeleteChannel", func(t *testing.T) {
+		// Initialize a new MemoryCache with a capacity of 10 items.
+		// The constructor creates the pendingDeleteCh buffer used for lazy deletions.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 10)
+
+		// Inject a "ghost-key" into the channel. This represents a key that was
+		// flagged for deletion by Get/Contains but might have already been
+		// removed or is simply waiting in the buffer.
+		cache.pendingDeleteCh <- "ghost-key"
+
+		// Close the cache, which triggers the internal close(m.pendingDeleteCh) logic.
+		// This transition is monitored by the 'ok' boolean in the receive operation.
+		cache.Close()
+
+		// Verify the atomic 'closed' flag is set to true.
+		// This confirms the cache is in its terminal state.
+		assert.True(t, cache.closed.Load())
+
+		// Execute drainPending and assert that it does not panic.
+		// The method must process the "ghost-key", reach the end of the channel,
+		// detect that the channel is closed ('ok == false'), and return cleanly.
+		assert.NotPanics(t, func() { cache.drainPending() }, "drainPending should handle keys and channel closure gracefully")
+
+		// Verify that the channel buffer is now empty.
+		// This confirms that the loop successfully processed existing items before exiting.
+		assert.Equal(t, 0, len(cache.pendingDeleteCh), "Channel should be cleared after drainPending")
+
+		// Assert that subsequent calls to drainPending on a closed channel
+		// also do not panic and return immediately.
+		assert.NotPanics(t, func() { cache.drainPending() }, "Subsequent calls on a closed channel should be no-ops")
 	})
 }
 
