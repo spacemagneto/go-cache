@@ -27,6 +27,12 @@ type MemoryCache[K comparable, V any] struct {
 	expireCheckInterval time.Duration        // Interval for cleaning up expired items
 	closed              atomic.Bool
 
+	// nextVersion is a per-instance monotonic counter stamped on every new Item.
+	// Comparing the version stored in a heap entry against the version of the
+	// live item in the map lets the collector detect tombstones in O(1) without
+	// an explicit removal on every eviction or Remove call.
+	nextVersion atomic.Uint64
+
 	// pendingDeleteCh carries keys of expired items found by Get/Contains so the
 	// collector can remove them in the background without blocking the caller.
 	pendingDeleteCh chan K
@@ -60,6 +66,7 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 		maxItems:            maxItems,
 		expireCheckInterval: expireCheckInterval,
 		contextCancelFunc:   cancel,
+		pendingDeleteCh:     make(chan K, maxItems),
 	}
 
 	// Initialize the expiration heap for the cache.
