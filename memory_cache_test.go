@@ -538,6 +538,188 @@ func TestMemoryCache(t *testing.T) {
 	})
 }
 
+// TestCollector groups tests that verify the background goroutine correctly
+// purges expired entries from both the items map and the expiration heap,
+// leaving no stale data or memory leaks behind.
+func TestCollector(t *testing.T) {
+	t.Parallel()
+
+	// PurgesExpiredItemsFromMap confirms that after the collector tick fires,
+	// entries whose TTL has elapsed are removed from the items map and the
+	// Len counter reflects the removal.
+	// This test validates the background cleanup cycle (collector goroutine)
+	// by ensuring it correctly identifies and evicts only expired keys.
+	t.Run("PurgesExpiredItemsFromMap", func(t *testing.T) {
+		// Initialize a new MemoryCache with a short 30ms expireCheckInterval.
+		// This allows the background collector to trigger frequently during the test.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+		// Ensure all resources and goroutines are cleaned up after the test completes.
+		// This prevents goroutine leaks in the test suite.
+		defer cache.Close()
+
+		// Add "key1" with a very short 20ms TTL to ensure it expires quickly.
+		// This item is the primary target for the collector's purge logic.
+		cache.Set("key1", 1, 20*time.Millisecond)
+		// Add "key2" with a long 1-minute TTL to ensure it survives the test.
+		// This serves as a control to prove the collector doesn't remove valid items.
+		cache.Set("key2", 2, time.Minute)
+
+		// Wait for at least 80ms to guarantee at least one collector tick has occurred.
+		// This duration covers both the 20ms TTL of key1 and the 30ms collector interval.
+		time.Sleep(80 * time.Millisecond)
+
+		// Attempt to retrieve "key1" to verify its removal.
+		// The collector should have already purged it during its periodic scan.
+		_, key1Alive := cache.Get("key1")
+		// Attempt to retrieve "key2" to verify its persistence.
+		// It should still be present since its TTL is much longer than the sleep duration.
+		_, key2Alive := cache.Get("key2")
+
+		// Assert that key1 is no longer in the cache.
+		// This confirms the background collector is functional and accurate.
+		assert.False(t, key1Alive, "Expected key1 to be purged by the collector after its TTL elapsed")
+		// Assert that key2 is still present in the cache.
+		// This confirms the collector correctly respects TTLs and does not over-evict.
+		assert.True(t, key2Alive, "Expected key2 to remain because its TTL has not yet elapsed")
+	})
+
+	// PurgesExpiredItemsFromHeap confirms that after the collector runs, the
+	// expiration heap contains no entries for keys that have been removed,
+	// proving there are no memory leaks in the heap structure.
+	// It ensures that the min-heap used for TTL tracking is synchronized with the
+	// map and list, preventing orphaned pointers in the heap.
+	t.Run("PurgesExpiredItemsFromHeap", func(t *testing.T) {
+		// Initialize a MemoryCache with a fast 30ms collector interval.
+		// This high frequency ensures that the background worker cleans up the heap quickly.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+
+		// Populate the cache with 50 short-lived items (20ms TTL).
+		// This creates a significant heap size to test the efficiency of the purge logic.
+		for i := 0; i < 50; i++ {
+			cache.Set(fmt.Sprintf("key%d", i), i, 20*time.Millisecond)
+		}
+
+		// Wait for 100ms to allow all 50 items to expire and the collector to finish its scan.
+		// This sleep duration is enough for multiple collector ticks and processing time.
+		time.Sleep(100 * time.Millisecond)
+
+		// Close the cache to stop the collector and ensure a stable state for inspection.
+		// This prevents concurrent modifications while we verify the internal heap and map.
+		cache.Close()
+
+		// Lock the mutex to safely access the internal data structures for validation.
+		// This ensures we get a consistent snapshot of the heap and map lengths.
+		cache.mutex.Lock()
+		heapLen := cache.expirationHeap.Len()
+		mapLen := len(cache.items)
+		cache.mutex.Unlock()
+
+		// Assert that the expiration heap is completely empty.
+		// This confirms that the collector successfully popped all expired entries from the heap.
+		assert.Equal(t, 0, heapLen, "Expected the expiration heap to be empty after all items expired and collector ran")
+		// Assert that the items map is also empty.
+		// This verifies that the heap purge and map deletion remained in sync.
+		assert.Equal(t, 0, mapLen, "Expected the items map to be empty after all items expired and collector ran")
+	})
+
+	// TombstonesFromRemoveAreDiscarded verifies that when items are removed
+	// before their TTL elapses, the stale heap entries left behind are recognised
+	// as tombstones by version comparison and are discarded without corrupting
+	// the items map or the size counter.
+	// This test is critical for validating the lazy deletion strategy: it ensures that
+	// manual removals via Remove() don't leave orphaned metadata that could interfere
+	// with the background collector's accuracy.
+	t.Run("TombstonesFromRemoveAreDiscarded", func(t *testing.T) {
+		// Initialize a MemoryCache with a short 30ms collector interval.
+		// This allows the background goroutine to quickly process the heap "tombstones"
+		// created by the subsequent Remove calls.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+
+		// Populate the cache with 50 items. Each item is assigned a unique version number
+		// internally and pushed onto the expiration heap.
+		for i := 0; i < 50; i++ {
+			cache.Set(fmt.Sprintf("key%d", i), i, 20*time.Millisecond)
+		}
+
+		// Immediately remove all 50 items. In a lazy-deletion architecture, this removes
+		// the keys from the items map but leaves the original entries in the heap.
+		// These heap entries are now "tombstones" because their version numbers no
+		// longer match any live item in the map.
+		for i := 0; i < 50; i++ {
+			cache.Remove(fmt.Sprintf("key%d", i))
+		}
+
+		// Wait for 100ms to allow the collector to perform a tick.
+		// During this tick, the collector pops entries from the heap, identifies them
+		// as tombstones (due to version mismatch or absence in the map), and discards them.
+		time.Sleep(100 * time.Millisecond)
+
+		// Shut down the cache to prevent further background activity.
+		// This provides a stable environment for asserting the final internal state.
+		cache.Close()
+
+		// Acquire the mutex lock to safely inspect the internal heap and map.
+		// This ensures no race conditions occur during the final verification.
+		cache.mutex.Lock()
+		heapLen := cache.expirationHeap.Len()
+		mapLen := len(cache.items)
+		cache.mutex.Unlock()
+
+		// Assert that the expiration heap has been fully drained of tombstones.
+		// This confirms the version-based filtering logic in the collector is working.
+		assert.Equal(t, 0, heapLen, "Expected heap to be empty after tombstone entries were discarded by the collector")
+		// Assert that the items map remains empty.
+		// This verifies that the collector didn't accidentally re-insert or fail to clean up data.
+		assert.Equal(t, 0, mapLen, "Expected items map to be empty after all keys were removed and collector ran")
+	})
+
+	// PendingDeleteDrainedByCollector confirms that expired keys signalled via
+	// the pendingDelete channel (from Get/Contains) are removed from the map by
+	// the collector rather than being left in memory indefinitely.
+	// This test validates the asynchronous deletion path: when a hot-path method (Get/Contains)
+	// discovers an expired item, it must successfully hand off the deletion task to the
+	// collector via the channel to avoid write-lock contention.
+	t.Run("PendingDeleteDrainedByCollector", func(t *testing.T) {
+		// Initialize a MemoryCache with a 30ms collector interval.
+		// This background interval ensures the collector frequently checks the
+		// pendingDelete channel for removal signals.
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, 30*time.Millisecond, 0)
+		// Ensure the collector goroutine and context are cleaned up after the test.
+		// This maintains test isolation and prevents background leaks.
+		defer cache.Close()
+
+		// Add "key1" with a short 20ms TTL.
+		// This item is set up to expire quickly so we can trigger the lazy-deletion signal.
+		cache.Set("key1", 1, 20*time.Millisecond)
+
+		// Sleep for 40ms to ensure the item's TTL has definitely elapsed.
+		// This timing is crucial to guarantee that the subsequent Get() call sees the item as expired.
+		time.Sleep(40 * time.Millisecond)
+
+		// Call Get() on the expired item.
+		// This should return false and internally send "key1" into the cache.pendingDeleteCh.
+		_, ok := cache.Get("key1")
+		// Assert that Get correctly identifies the item as expired.
+		assert.False(t, ok, "Expected Get to return false for an expired key")
+
+		// Wait for 60ms to allow the collector to wake up, drain the channel,
+		// and execute the actual removal logic (removeLocked).
+		time.Sleep(60 * time.Millisecond)
+
+		// Acquire a read lock to safely inspect the internal map state.
+		// This ensures we are not reading while the collector is performing the final cleanup.
+		cache.mutex.RLock()
+		// Check if "key1" still exists in the underlying storage map.
+		_, stillInMap := cache.items["key1"]
+		// Release the lock immediately after checking.
+		cache.mutex.RUnlock()
+
+		// Assert that the item has been physically removed from the map.
+		// This confirms the hand-off from Get() to the collector via the channel was successful.
+		assert.False(t, stillInMap, "Expected key1 to be removed from the items map after the collector drained pendingDelete")
+	})
+}
+
 // TestConcurrentAccess tests thread-safety under concurrent Set, Get, and Remove.
 // TestConcurrentAccess tests the MemoryCache's ability to handle concurrent access.
 // It validates the thread-safety of the cache during simultaneous Set, Get, and Remove operations
