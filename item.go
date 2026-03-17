@@ -2,6 +2,13 @@ package go_cache
 
 import "time"
 
+// entry is the payload stored inside each linked-list element.
+// Wrapping the pointer here lets evictLRULocked retrieve the key in O(1)
+// without storing it redundantly in the list element's interface value.
+type entry[K comparable, V any] struct {
+	item *Item[K, V]
+}
+
 // Item represents a generic item that can be stored in a priority queue.
 // It contains a key of type Key, a value of type Value, an expiration time,
 // and an index for heap management.
