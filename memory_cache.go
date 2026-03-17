@@ -17,16 +17,17 @@ const (
 
 // MemoryCache represents an in-memory cache with TTL support and LRU eviction.
 type MemoryCache[K comparable, V any] struct {
-	parentCtx           context.Context      // Parent context to manage goroutines
 	list                *list.List           // Doubly-linked list for LRU ordering
 	items               map[K]*list.Element  // Map for quick lookups
 	expirationHeap      ExpirationHeap[K, V] // Min-heap for expiration tracking
-	wg                  sync.WaitGroup       // WaitGroup for managing goroutines
 	ttl                 time.Duration        // Default time-to-live duration
 	maxItems            int                  // Maximum number of items in the cache (0 = unlimited)
 	size                atomic.Int32         // Atomic counter for cache size
 	mutex               sync.RWMutex         // Mutex for thread safety
 	expireCheckInterval time.Duration        // Interval for cleaning up expired items
+
+	contextCancelFunc context.CancelFunc
+	wg                sync.WaitGroup // WaitGroup for managing goroutines
 }
 
 // NewMemoryCache creates a new MemoryCache instance with the specified TTL and max items.
@@ -44,7 +45,17 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 		maxItems = DefaultMaxItems
 	}
 
-	cache := &MemoryCache[K, V]{parentCtx: ctx, list: list.New(), items: make(map[K]*list.Element), expirationHeap: make(ExpirationHeap[K, V], 0), ttl: ttl, maxItems: maxItems, expireCheckInterval: expireCheckInterval}
+	ctx, cancel := context.WithCancel(ctx)
+
+	cache := &MemoryCache[K, V]{
+		list:                list.New(),
+		items:               make(map[K]*list.Element),
+		expirationHeap:      make(ExpirationHeap[K, V], 0),
+		ttl:                 ttl,
+		maxItems:            maxItems,
+		expireCheckInterval: expireCheckInterval,
+		contextCancelFunc:   cancel,
+	}
 
 	// Initialize the expiration heap for the cache.
 	// This ensures that the heap is properly set up for managing expiration times.
@@ -63,7 +74,7 @@ func NewMemoryCache[K comparable, V any](ctx context.Context, ttl, expireCheckIn
 
 		// Call the collector method to handle cache entry expiration.
 		// The collector method runs continuously to remove expired entries from the cache.
-		cache.collector()
+		cache.collector(ctx)
 	}()
 
 	return cache
@@ -214,7 +225,7 @@ func (m *MemoryCache[K, V]) Len() int {
 // collector runs in the background to periodically remove expired items from the cache.
 // It uses a ticker to trigger expiration checks at regular intervals, ensuring the cache stays clean.
 // The collector stops running when the parent context signals cancellation, allowing graceful shutdown.
-func (m *MemoryCache[K, V]) collector() {
+func (m *MemoryCache[K, V]) collector(ctx context.Context) {
 	ticker := time.NewTicker(m.expireCheckInterval)
 	defer ticker.Stop()
 
@@ -229,7 +240,7 @@ func (m *MemoryCache[K, V]) collector() {
 
 		// If the parent context signals done, exit the collector to stop cleanup activities.
 		// This ensures that when the cache is no longer needed, the background goroutine terminates properly.
-		case <-m.parentCtx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
