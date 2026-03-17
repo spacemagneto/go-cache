@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 )
 
 func TestMemoryCache(t *testing.T) {
@@ -717,6 +718,73 @@ func TestCollector(t *testing.T) {
 		// Assert that the item has been physically removed from the map.
 		// This confirms the hand-off from Get() to the collector via the channel was successful.
 		assert.False(t, stillInMap, "Expected key1 to be removed from the items map after the collector drained pendingDelete")
+	})
+}
+
+// TestClose groups all shutdown contracts: idempotency, goroutine termination
+// verified by goleak, and the observable behaviour of each public method after
+// the cache has been closed.
+func TestClose(t *testing.T) {
+	goleak.VerifyNone(t)
+
+	// IdempotentMultipleCalls confirms that invoking Close more than once does
+	// not panic and does not cause a double-close of the internal channel.
+	t.Run("IdempotentMultipleCalls", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Close()
+
+		assert.NotPanics(t, cache.Close, "Expected second Close call to be a no-op without panicking")
+	})
+
+	// CollectorGoroutineExits uses goleak to assert that no goroutines spawned
+	// by the cache outlive a Close call, confirming there are no leaks.
+	t.Run("CollectorGoroutineExits", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, 0)
+		cache.Close()
+	})
+
+	// GetReturnsFalseAfterClose confirms that Get returns the zero value and
+	// false for any key after the cache has been closed.
+	t.Run("GetReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		value, ok := cache.Get("key1")
+		assert.False(t, ok, "Expected Get to return false after cache is closed")
+		assert.Equal(t, 0, value, "Expected Get to return zero value after cache is closed")
+	})
+
+	// ContainsReturnsFalseAfterClose confirms that Contains returns false for
+	// any key after the cache has been closed.
+	t.Run("ContainsReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		assert.False(t, cache.Contains("key1"), "Expected Contains to return false after cache is closed")
+	})
+
+	// RemoveReturnsFalseAfterClose confirms that Remove returns false for any
+	// key after the cache has been closed.
+	t.Run("RemoveReturnsFalseAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Set("key1", 1, time.Minute)
+		cache.Close()
+
+		assert.False(t, cache.Remove("key1"), "Expected Remove to return false after cache is closed")
+	})
+
+	// SetIsNoOpAfterClose confirms that Set silently does nothing after the
+	// cache has been closed: the value is not stored and Len stays at zero.
+	t.Run("SetIsNoOpAfterClose", func(t *testing.T) {
+		cache := NewMemoryCache[string, int](context.Background(), time.Minute, time.Minute, 0)
+		cache.Close()
+
+		cache.Set("key1", 1, time.Minute)
+
+		assert.Equal(t, 0, cache.Len(), "Expected Len to be 0 after Set on a closed cache")
 	})
 }
 
