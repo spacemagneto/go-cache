@@ -25,6 +25,11 @@ type MemoryCache[K comparable, V any] struct {
 	size                atomic.Int32         // Atomic counter for cache size
 	mutex               sync.RWMutex         // Mutex for thread safety
 	expireCheckInterval time.Duration        // Interval for cleaning up expired items
+	closed              atomic.Bool
+
+	// pendingDeleteCh carries keys of expired items found by Get/Contains so the
+	// collector can remove them in the background without blocking the caller.
+	pendingDeleteCh chan K
 
 	contextCancelFunc context.CancelFunc
 	wg                sync.WaitGroup // WaitGroup for managing goroutines
@@ -220,6 +225,20 @@ func (m *MemoryCache[K, V]) Len() int {
 	// Access the current size of the cache using the atomic Load method.
 	// This operation is thread-safe and ensures consistency across multiple goroutines.
 	return int(m.size.Load())
+}
+
+// evictLRULocked removes the least-recently-used entry from the cache to make
+// room for a new item. Caller must hold mu for writing.
+func (m *MemoryCache[K, V]) evictLRULocked() {
+	element := m.list.Back()
+	if element == nil {
+		return
+	}
+
+	item := element.Value.(*entry[K, V]).item
+	m.list.Remove(element)
+	delete(m.items, item.Key)
+	m.size.Add(-1)
 }
 
 // collector runs in the background to periodically remove expired items from the cache.
